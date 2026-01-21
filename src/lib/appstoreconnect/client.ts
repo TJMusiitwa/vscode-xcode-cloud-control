@@ -175,20 +175,23 @@ export class AppStoreConnectClient {
     }
 
     // Xcode Cloud: trigger a build run
-    async createBuildRun(workflowId: string, gitRefId?: string) {
+    // Valid relationships: workflow (required), sourceBranchOrTag (optional), pullRequest (optional), buildRun (optional for re-runs)
+    async createBuildRun(workflowId: string, gitRefId?: string, options?: { clean?: boolean }) {
         const payload: any = {
             data: {
                 type: 'ciBuildRuns',
+                attributes: {
+                    clean: options?.clean ?? false
+                },
                 relationships: {
                     workflow: { data: { type: 'ciWorkflows', id: workflowId } }
                 }
             }
         };
-        // Depending on configuration, you may need to specify sourceCommit or branch/tag reference
+        // Use sourceBranchOrTag to specify a branch or tag reference (NOT sourceCommit)
         if (gitRefId) {
-            payload.data.relationships['sourceCommit'] = { data: { type: 'scmGitReferences', id: gitRefId } };
+            payload.data.relationships['sourceBranchOrTag'] = { data: { type: 'scmGitReferences', id: gitRefId } };
         }
-        // Some setups may require 'sourceBranchOrTag' or use 'scmPullRequest'. Adjust per Apple docs.
         const res = await this.post('/ciBuildRuns', payload);
         return res?.data;
     }
