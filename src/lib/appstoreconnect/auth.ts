@@ -2,7 +2,7 @@ import { importPKCS8, SignJWT } from 'jose';
 import * as vscode from 'vscode';
 import { CredentialKeys } from '../credentials';
 
-const AUDIENCE = 'appstoreconnect.apple.com';
+const AUDIENCE = 'appstoreconnect-v1';
 const ALG = 'ES256';
 
 export class JwtProvider {
