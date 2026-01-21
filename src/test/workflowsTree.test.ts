@@ -5,7 +5,7 @@ import { restoreAll, stubErrorMessage, stubQuickPick } from './helpers';
 
 class MockClient {
     constructor(private data: any, private shouldThrow = false) { }
-    async listWorkflows(): Promise<any> {
+    async listAllWorkflows(): Promise<any> {
         if (this.shouldThrow) { throw new Error('boom'); }
         return this.data;
     }

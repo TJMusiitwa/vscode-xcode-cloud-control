@@ -93,7 +93,7 @@ export class BuildMonitor {
 
     private async discoverActiveBuilds(): Promise<void> {
         try {
-            const response = await this.client.listBuildRuns({ limit: 10 });
+            const response = await this.client.listAllRecentBuilds({ limit: 10 });
             const builds = response?.data || [];
 
             for (const build of builds) {

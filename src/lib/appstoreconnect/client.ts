@@ -60,31 +60,113 @@ export class AppStoreConnectClient {
         return await res.body.json();
     }
 
-    // Xcode Cloud: list workflows
-    async listWorkflows(options?: { projectId?: string }) {
-        // Optionally filter by project: filter[project] or filter[product]
+    // Xcode Cloud: list all products (apps with Xcode Cloud enabled)
+    async listProducts(options?: { limit?: number }) {
         const query: Record<string, string> = {};
-        if (options?.projectId) {
-            query['filter[project]'] = options.projectId;
-        }
-        return this.get('/ciWorkflows', query);
-    }
-
-    // Xcode Cloud: list build runs (optionally per workflow)
-    async listBuildRuns(options?: { workflowId?: string; limit?: number }) {
-        const query: Record<string, string> = {};
-        if (options?.workflowId) {
-            query['filter[workflow]'] = options.workflowId;
-        }
         if (options?.limit) {
             query['limit'] = String(options.limit);
         }
-        return this.get('/ciBuildRuns', query);
+        return this.get('/ciProducts', query);
+    }
+
+    // Xcode Cloud: list workflows for a product (required - /ciWorkflows doesn't allow collection listing)
+    async listWorkflowsByProduct(productId: string, options?: { limit?: number }) {
+        const query: Record<string, string> = {};
+        if (options?.limit) {
+            query['limit'] = String(options.limit);
+        }
+        return this.get(`/ciProducts/${productId}/workflows`, query);
+    }
+
+    // Xcode Cloud: list all workflows across all products
+    async listAllWorkflows(options?: { limit?: number }): Promise<any> {
+        const limit = options?.limit || 50;
+        const productsResponse = await this.listProducts({ limit: 50 });
+        const products = productsResponse?.data || [];
+
+        if (products.length === 0) {
+            return { data: [] };
+        }
+
+        // Fetch workflows from all products in parallel
+        const workflowPromises = products.map((product: any) =>
+            this.listWorkflowsByProduct(product.id, { limit: Math.ceil(limit / products.length) + 5 })
+                .then(response => {
+                    // Attach product info to each workflow for context
+                    const workflows = response?.data || [];
+                    return workflows.map((wf: any) => ({
+                        ...wf,
+                        _productId: product.id,
+                        _productName: product?.attributes?.name || 'Unknown'
+                    }));
+                })
+                .catch(() => []) // Ignore errors for individual products
+        );
+
+        const results = await Promise.all(workflowPromises);
+        const allWorkflows = results.flat().slice(0, limit);
+
+        return { data: allWorkflows };
+    }
+
+    // Xcode Cloud: list build runs for a workflow (required - cannot list all builds directly)
+    async listBuildRuns(options: { workflowId: string; limit?: number }) {
+        const query: Record<string, string> = {};
+        if (options.limit) {
+            query['limit'] = String(options.limit);
+        }
+        // Apple's API requires fetching builds via the workflow relationship
+        return this.get(`/ciWorkflows/${options.workflowId}/buildRuns`, query);
+    }
+
+    // Xcode Cloud: list build runs for a product (alternative to per-workflow)
+    async listBuildRunsByProduct(options: { productId: string; limit?: number }) {
+        const query: Record<string, string> = {};
+        if (options.limit) {
+            query['limit'] = String(options.limit);
+        }
+        return this.get(`/ciProducts/${options.productId}/buildRuns`, query);
+    }
+
+    // Xcode Cloud: list all recent builds across all products
+    async listAllRecentBuilds(options?: { limit?: number }): Promise<any> {
+        const limit = options?.limit || 10;
+        const productsResponse = await this.listProducts({ limit: 50 });
+        const products = productsResponse?.data || [];
+
+        if (products.length === 0) {
+            return { data: [] };
+        }
+
+        // Fetch builds from all products in parallel
+        const buildPromises = products.map((product: any) =>
+            this.listBuildRunsByProduct({ productId: product.id, limit: Math.ceil(limit / products.length) + 5 })
+                .catch(() => ({ data: [] })) // Ignore errors for individual products
+        );
+
+        const results = await Promise.all(buildPromises);
+
+        // Combine and sort by startedDate (most recent first)
+        const allBuilds = results
+            .flatMap(r => r?.data || [])
+            .sort((a: any, b: any) => {
+                const dateA = a?.attributes?.startedDate || a?.attributes?.createdDate || '';
+                const dateB = b?.attributes?.startedDate || b?.attributes?.createdDate || '';
+                return dateB.localeCompare(dateA);
+            })
+            .slice(0, limit);
+
+        return { data: allBuilds };
     }
 
     // Xcode Cloud: list git references (branches/tags) for a repository
-    async listGitReferences(scmRepoId: string) {
-        return this.get('/scmGitReferences', { 'filter[repository]': scmRepoId });
+    // Note: /scmGitReferences doesn't allow collection listing - must fetch via repository
+    async listGitReferences(scmRepoId: string, options?: { limit?: number }) {
+        const query: Record<string, string> = {};
+        if (options?.limit) {
+            query['limit'] = String(options.limit);
+        }
+        return this.get(`/scmRepositories/${scmRepoId}/gitReferences`, query);
     }
 
     // Helper: fetch workflow details including linked repository
@@ -112,12 +194,18 @@ export class AppStoreConnectClient {
     }
 
     // Xcode Cloud: cancel a build run
+    // Note: Apple's API may not support DELETE for build runs. The proper way to cancel
+    // a build may be different or not available via the API. This currently attempts DELETE.
     async cancelBuildRun(buildRunId: string) {
         const url = `${BASE_URL}/ciBuildRuns/${buildRunId}`;
         const headers = await this.getHeaders();
         const res = await request(url, { method: 'DELETE', headers });
         if (res.statusCode >= 400) {
             const text = await res.body.text();
+            // If API doesn't support cancellation, provide helpful error
+            if (res.statusCode === 403 || res.statusCode === 405) {
+                throw new Error(`Build cancellation is not supported via the API. Status: ${res.statusCode}`);
+            }
             throw new Error(`DELETE ${url} failed (${res.statusCode}): ${text}`);
         }
         return true;

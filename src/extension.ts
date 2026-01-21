@@ -170,7 +170,7 @@ async function updateStatusBar() {
 	if (!statusBarItem || !client) { return; }
 
 	try {
-		const runs = await client.listBuildRuns({ limit: 5 });
+		const runs = await client.listAllRecentBuilds({ limit: 5 });
 		const data = runs?.data || [];
 
 		const running = data.filter((r: any) => {

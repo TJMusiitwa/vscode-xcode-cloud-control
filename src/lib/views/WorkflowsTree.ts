@@ -12,7 +12,7 @@ export class WorkflowsTreeDataProvider implements vscode.TreeDataProvider<Workfl
     }
 
     async pickWorkflowId(): Promise<string | undefined> {
-        const workflows = await this.client.listWorkflows();
+        const workflows = await this.client.listAllWorkflows();
         const items = (workflows?.data || []).map((wf: any) => ({
             label: wf?.attributes?.name || wf.id,
             description: wf.id,
@@ -28,7 +28,7 @@ export class WorkflowsTreeDataProvider implements vscode.TreeDataProvider<Workfl
 
     async getChildren(): Promise<WorkflowItem[]> {
         try {
-            const workflows = await this.client.listWorkflows();
+            const workflows = await this.client.listAllWorkflows();
             return (workflows?.data || []).map((wf: any) => {
                 const item = new WorkflowItem(
                     wf.id,
