@@ -42,18 +42,8 @@
     "views": {
       "xcodecloud": [
         {
-          "id": "xcodecloudWorkflows",
+          "id": "xcodecloudWorkflowRuns",
           "name": "Workflows",
-          "icon": "$(list-unordered)"
-        },
-        {
-          "id": "xcodecloudBuildRuns",
-          "name": "Build Runs",
-          "icon": "$(history)"
-        },
-        {
-          "id": "xcodecloudBuildActions",
-          "name": "Build Actions",
           "icon": "$(list-tree)"
         },
         {
@@ -113,23 +103,23 @@
         "command": "xcodecloud.refreshWorkflowDetails",
         "title": "Xcode Cloud: Refresh Workflow Details",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "xcodecloud.toggleSortOrder",
+        "title": "Xcode Cloud: Toggle Sort Order",
+        "icon": "$(arrow-swap)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "xcodecloud.refreshWorkflows",
-          "when": "view == xcodecloudWorkflows",
+          "when": "view == xcodecloudWorkflowRuns",
           "group": "navigation"
         },
         {
-          "command": "xcodecloud.refreshBuildRuns",
-          "when": "view == xcodecloudBuildRuns",
-          "group": "navigation"
-        },
-        {
-          "command": "xcodecloud.refreshBuildActions",
-          "when": "view == xcodecloudBuildActions",
+          "command": "xcodecloud.toggleSortOrder",
+          "when": "view == xcodecloudWorkflowRuns",
           "group": "navigation"
         },
         {
@@ -139,44 +129,39 @@
         },
         {
           "command": "xcodecloud.configureCredentials",
-          "when": "view == xcodecloudWorkflows || view == xcodecloudBuildRuns || view == xcodecloudBuildActions || view == xcodecloudWorkflowDetails",
+          "when": "view == xcodecloudWorkflowRuns || view == xcodecloudWorkflowDetails",
           "group": "navigation"
         }
       ],
       "view/item/context": [
         {
           "command": "xcodecloud.triggerBuild",
-          "when": "view == xcodecloudWorkflows && viewItem == workflow",
+          "when": "view == xcodecloudWorkflowRuns && viewItem == workflow",
           "group": "inline"
         },
         {
           "command": "xcodecloud.triggerBuild",
-          "when": "view == xcodecloudWorkflows && viewItem == workflow",
+          "when": "view == xcodecloudWorkflowRuns && viewItem == workflow",
           "group": "1_actions@1"
         },
         {
           "command": "xcodecloud.cancelBuild",
-          "when": "view == xcodecloudBuildRuns && viewItem == buildRunActive",
+          "when": "view == xcodecloudWorkflowRuns && viewItem == buildRunActive",
           "group": "inline"
         },
         {
           "command": "xcodecloud.cancelBuild",
-          "when": "view == xcodecloudBuildRuns && viewItem == buildRunActive",
+          "when": "view == xcodecloudWorkflowRuns && viewItem == buildRunActive",
           "group": "1_actions@1"
         },
         {
-          "command": "xcodecloud.viewBuildLogs",
-          "when": "view == xcodecloudBuildRuns && viewItem =~ /buildRun/",
-          "group": "1_actions@2"
-        },
-        {
           "command": "xcodecloud.openInBrowser",
-          "when": "view == xcodecloudWorkflows || view == xcodecloudBuildRuns",
+          "when": "view == xcodecloudWorkflowRuns",
           "group": "2_navigation@1"
         },
         {
           "command": "xcodecloud.viewWorkflowDetails",
-          "when": "view == xcodecloudWorkflows && viewItem == workflow",
+          "when": "view == xcodecloudWorkflowRuns && viewItem == workflow",
           "group": "1_actions@3"
         }
       ]
