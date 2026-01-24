@@ -235,4 +235,170 @@ export class AppStoreConnectClient {
     async getBuildRun(buildRunId: string) {
         return this.get(`/ciBuildRuns/${buildRunId}`);
     }
+
+    // ==========================
+    // Generic HTTP Methods
+    // ==========================
+
+    async patch(path: string, body: any): Promise<any> {
+        const url = `${BASE_URL}${path}`;
+        const headers = await this.getHeaders();
+        const res = await request(url, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify(body)
+        });
+        if (res.statusCode >= 400) {
+            const text = await res.body.text();
+            throw new Error(`PATCH ${url} failed (${res.statusCode}): ${text}`);
+        }
+        return await res.body.json();
+    }
+
+    async delete(path: string): Promise<void> {
+        const url = `${BASE_URL}${path}`;
+        const headers = await this.getHeaders();
+        const res = await request(url, { method: 'DELETE', headers });
+        if (res.statusCode >= 400) {
+            const text = await res.body.text();
+            throw new Error(`DELETE ${url} failed (${res.statusCode}): ${text}`);
+        }
+    }
+
+    // ==========================
+    // Workflow CRUD Operations
+    // ==========================
+
+    /**
+     * Create a new Xcode Cloud workflow
+     * Requires: product, repository, xcodeVersion, macOsVersion relationships
+     */
+    async createWorkflow(
+        productId: string,
+        repositoryId: string,
+        xcodeVersionId: string,
+        macOsVersionId: string,
+        attributes: {
+            name: string;
+            description?: string;
+            isEnabled?: boolean;
+            isLockedForEditing?: boolean;
+            clean?: boolean;
+            containerFilePath?: string;
+            branchStartCondition?: any;
+            tagStartCondition?: any;
+            pullRequestStartCondition?: any;
+            scheduledStartCondition?: any;
+            manualBranchStartCondition?: any;
+            actions?: any[];
+        }
+    ): Promise<any> {
+        const payload = {
+            data: {
+                type: 'ciWorkflows',
+                attributes: {
+                    name: attributes.name,
+                    description: attributes.description || '',
+                    isEnabled: attributes.isEnabled ?? true,
+                    isLockedForEditing: attributes.isLockedForEditing ?? false,
+                    clean: attributes.clean ?? false,
+                    containerFilePath: attributes.containerFilePath,
+                    branchStartCondition: attributes.branchStartCondition,
+                    tagStartCondition: attributes.tagStartCondition,
+                    pullRequestStartCondition: attributes.pullRequestStartCondition,
+                    scheduledStartCondition: attributes.scheduledStartCondition,
+                    manualBranchStartCondition: attributes.manualBranchStartCondition,
+                    actions: attributes.actions || []
+                },
+                relationships: {
+                    product: { data: { type: 'ciProducts', id: productId } },
+                    repository: { data: { type: 'scmRepositories', id: repositoryId } },
+                    xcodeVersion: { data: { type: 'ciXcodeVersions', id: xcodeVersionId } },
+                    macOsVersion: { data: { type: 'ciMacOsVersions', id: macOsVersionId } }
+                }
+            }
+        };
+        return this.post('/ciWorkflows', payload);
+    }
+
+    /**
+     * Update an existing Xcode Cloud workflow
+     */
+    async updateWorkflow(
+        workflowId: string,
+        attributes: {
+            name?: string;
+            description?: string;
+            isEnabled?: boolean;
+            clean?: boolean;
+            containerFilePath?: string;
+            branchStartCondition?: any | null;
+            tagStartCondition?: any | null;
+            pullRequestStartCondition?: any | null;
+            scheduledStartCondition?: any | null;
+            manualBranchStartCondition?: any | null;
+            actions?: any[];
+        }
+    ): Promise<any> {
+        // Build attributes object with only defined values
+        const attrs: Record<string, any> = {};
+        if (attributes.name !== undefined) { attrs.name = attributes.name; }
+        if (attributes.description !== undefined) { attrs.description = attributes.description; }
+        if (attributes.isEnabled !== undefined) { attrs.isEnabled = attributes.isEnabled; }
+        if (attributes.clean !== undefined) { attrs.clean = attributes.clean; }
+        if (attributes.containerFilePath !== undefined) { attrs.containerFilePath = attributes.containerFilePath; }
+        if (attributes.branchStartCondition !== undefined) { attrs.branchStartCondition = attributes.branchStartCondition; }
+        if (attributes.tagStartCondition !== undefined) { attrs.tagStartCondition = attributes.tagStartCondition; }
+        if (attributes.pullRequestStartCondition !== undefined) { attrs.pullRequestStartCondition = attributes.pullRequestStartCondition; }
+        if (attributes.scheduledStartCondition !== undefined) { attrs.scheduledStartCondition = attributes.scheduledStartCondition; }
+        if (attributes.manualBranchStartCondition !== undefined) { attrs.manualBranchStartCondition = attributes.manualBranchStartCondition; }
+        if (attributes.actions !== undefined) { attrs.actions = attributes.actions; }
+
+        const payload = {
+            data: {
+                type: 'ciWorkflows',
+                id: workflowId,
+                attributes: attrs
+            }
+        };
+        return this.patch(`/ciWorkflows/${workflowId}`, payload);
+    }
+
+    /**
+     * Delete an Xcode Cloud workflow and all associated data
+     */
+    async deleteWorkflow(workflowId: string): Promise<void> {
+        return this.delete(`/ciWorkflows/${workflowId}`);
+    }
+
+    // ==========================
+    // Helper Methods for Workflow Creation
+    // ==========================
+
+    /**
+     * List available Xcode versions for workflows
+     */
+    async listXcodeVersions(options?: { limit?: number }) {
+        const query: Record<string, string> = {};
+        if (options?.limit) { query['limit'] = String(options.limit); }
+        return this.get('/ciXcodeVersions', query);
+    }
+
+    /**
+     * List available macOS versions for workflows
+     */
+    async listMacOsVersions(xcodeVersionId: string, options?: { limit?: number }) {
+        const query: Record<string, string> = {};
+        if (options?.limit) { query['limit'] = String(options.limit); }
+        return this.get(`/ciXcodeVersions/${xcodeVersionId}/macOsVersions`, query);
+    }
+
+    /**
+     * List repositories for a product
+     */
+    async listRepositories(productId: string, options?: { limit?: number }) {
+        const query: Record<string, string> = {};
+        if (options?.limit) { query['limit'] = String(options.limit); }
+        return this.get(`/ciProducts/${productId}/primaryRepositories`, query);
+    }
 }

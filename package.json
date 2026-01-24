@@ -108,19 +108,39 @@
         "command": "xcodecloud.toggleSortOrder",
         "title": "Xcode Cloud: Toggle Sort Order",
         "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "xcodecloud.createWorkflow",
+        "title": "Xcode Cloud: Create Workflow",
+        "icon": "$(add)"
+      },
+      {
+        "command": "xcodecloud.editWorkflow",
+        "title": "Xcode Cloud: Edit Workflow",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "xcodecloud.deleteWorkflow",
+        "title": "Xcode Cloud: Delete Workflow",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
       "view/title": [
         {
+          "command": "xcodecloud.createWorkflow",
+          "when": "view == xcodecloudWorkflowRuns",
+          "group": "navigation@1"
+        },
+        {
           "command": "xcodecloud.refreshWorkflows",
           "when": "view == xcodecloudWorkflowRuns",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "xcodecloud.toggleSortOrder",
           "when": "view == xcodecloudWorkflowRuns",
-          "group": "navigation"
+          "group": "navigation@3"
         },
         {
           "command": "xcodecloud.refreshWorkflowDetails",
@@ -163,6 +183,16 @@
           "command": "xcodecloud.viewWorkflowDetails",
           "when": "view == xcodecloudWorkflowRuns && viewItem == workflow",
           "group": "1_actions@3"
+        },
+        {
+          "command": "xcodecloud.editWorkflow",
+          "when": "view == xcodecloudWorkflowRuns && viewItem == workflow",
+          "group": "1_actions@4"
+        },
+        {
+          "command": "xcodecloud.deleteWorkflow",
+          "when": "view == xcodecloudWorkflowRuns && viewItem == workflow",
+          "group": "3_danger@1"
         }
       ]
     }

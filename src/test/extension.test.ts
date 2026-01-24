@@ -21,7 +21,10 @@ suite('Xcode Cloud Control Extension Test Suite', () => {
 			'xcodecloud.triggerBuild',
 			'xcodecloud.cancelBuild',
 			'xcodecloud.viewBuildLogs',
-			'xcodecloud.openInBrowser'
+			'xcodecloud.openInBrowser',
+			'xcodecloud.createWorkflow',
+			'xcodecloud.editWorkflow',
+			'xcodecloud.deleteWorkflow'
 		];
 
 		// In test environment, commands may not be registered yet

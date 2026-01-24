@@ -4,6 +4,7 @@ import { BuildMonitor } from './lib/buildMonitor';
 import { ensureCredentials } from './lib/credentials';
 import { BuildRunNode, UnifiedWorkflowTreeDataProvider, WorkflowNode } from './lib/views/UnifiedWorkflowTree';
 import { WorkflowDetailsTreeDataProvider } from './lib/views/WorkflowDetailsTree';
+import { WorkflowEditorPanel } from './lib/views/WorkflowEditorPanel';
 
 let client: AppStoreConnectClient | null = null;
 let unifiedProvider: UnifiedWorkflowTreeDataProvider | null = null;
@@ -120,6 +121,88 @@ export async function activate(context: vscode.ExtensionContext) {
 				unifiedProvider.toggleSortOrder();
 				const order = unifiedProvider.sortOrder === 'desc' ? 'Newest first' : 'Oldest first';
 				vscode.window.showInformationMessage(`Build runs sorted: ${order}`);
+			}
+		}),
+
+		// Create workflow
+		vscode.commands.registerCommand('xcodecloud.createWorkflow', async () => {
+			if (!client) { return; }
+
+			try {
+				// First, pick a product to create the workflow for
+				const products = await client.listProducts();
+				const productItems = (products?.data || []).map((p: any) => ({
+					label: p?.attributes?.name || p.id,
+					productId: p.id
+				}));
+
+				if (productItems.length === 0) {
+					vscode.window.showWarningMessage('No Xcode Cloud products found. Create a product in App Store Connect first.');
+					return;
+				}
+
+				const selectedProduct = await vscode.window.showQuickPick(productItems, {
+					placeHolder: 'Select a product to create the workflow for'
+				}) as any;
+
+				if (!selectedProduct) { return; }
+
+				WorkflowEditorPanel.createOrShow(
+					context.extensionUri,
+					client,
+					'create',
+					undefined,
+					undefined,
+					selectedProduct.productId
+				);
+			} catch (err: any) {
+				vscode.window.showErrorMessage(`Failed to create workflow: ${err?.message || String(err)}`);
+			}
+		}),
+
+		// Edit workflow
+		vscode.commands.registerCommand('xcodecloud.editWorkflow', async (workflowNode?: WorkflowNode) => {
+			if (!client) { return; }
+
+			const workflowId = workflowNode?.workflowId || (await unifiedProvider?.pickWorkflowId());
+			if (!workflowId) { return; }
+
+			const workflowName = workflowNode?.workflowName || `Workflow ${workflowId.slice(-6)}`;
+
+			WorkflowEditorPanel.createOrShow(
+				context.extensionUri,
+				client,
+				'edit',
+				workflowId,
+				workflowName
+			);
+		}),
+
+		// Delete workflow (with modal confirmation)
+		vscode.commands.registerCommand('xcodecloud.deleteWorkflow', async (workflowNode?: WorkflowNode) => {
+			if (!client) { return; }
+
+			const workflowId = workflowNode?.workflowId || (await unifiedProvider?.pickWorkflowId());
+			if (!workflowId) { return; }
+
+			const workflowName = workflowNode?.workflowName || `Workflow ${workflowId.slice(-6)}`;
+
+			// Show modal confirmation dialog
+			const confirm = await vscode.window.showWarningMessage(
+				`Are you sure you want to delete "${workflowName}"?\n\nThis will permanently delete the workflow and all its associated build runs. This action cannot be undone.`,
+				{ modal: true, detail: 'This will delete all build history for this workflow.' },
+				'Delete Workflow'
+			);
+
+			if (confirm !== 'Delete Workflow') { return; }
+
+			try {
+				await client.deleteWorkflow(workflowId);
+				vscode.window.showInformationMessage(`Workflow "${workflowName}" deleted successfully.`);
+				unifiedProvider?.refresh();
+				workflowDetailsProvider?.clear();
+			} catch (err: any) {
+				vscode.window.showErrorMessage(`Failed to delete workflow: ${err?.message || String(err)}`);
 			}
 		}),
 
