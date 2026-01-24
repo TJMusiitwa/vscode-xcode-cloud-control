@@ -1,23 +1,85 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { BuildRunsTreeDataProvider } from '../lib/views/BuildRunsTree';
-import { WorkflowsTreeDataProvider } from '../lib/views/WorkflowsTree';
+import { BuildActionNode, BuildRunNode, UnifiedWorkflowTreeDataProvider, WorkflowNode } from '../lib/views/UnifiedWorkflowTree';
 import { restoreAll, stubErrorMessage, stubQuickPick } from './helpers';
 
 class MockClient {
     constructor(private responses: Record<string, any> = {}) { }
+    async listAllWorkflows(): Promise<any> { return this.responses.listAllWorkflows; }
     async listBuildRuns(_: any): Promise<any> { return this.responses.listBuildRuns; }
+    async getBuildActions(_: string): Promise<any> { return this.responses.getBuildActions; }
     async getWorkflow(_: string): Promise<any> { return this.responses.getWorkflow; }
     async listGitReferences(_: string): Promise<any> { return this.responses.listGitReferences; }
 }
 
-class MockWorkflowsProvider extends WorkflowsTreeDataProvider {
-    constructor() { super({} as any); }
-    async pickWorkflowId(): Promise<string | undefined> { return 'wf-123'; }
-}
+suite('UnifiedWorkflowTreeDataProvider', () => {
+    test('getChildren at root returns workflows', async () => {
+        const client = new MockClient({
+            listAllWorkflows: {
+                data: [
+                    { id: 'wf-1', attributes: { name: 'Workflow 1', isEnabled: true }, _productName: 'App 1' },
+                    { id: 'wf-2', attributes: { name: 'Workflow 2', isEnabled: false }, _productName: 'App 2' },
+                ]
+            }
+        });
+        const provider = new UnifiedWorkflowTreeDataProvider(client as any);
+        const items = await provider.getChildren();
 
-suite('BuildRunsTreeDataProvider', () => {
-    test('getChildren maps runs with status and icons', async () => {
+        assert.strictEqual(items.length, 2);
+        assert.ok(items[0] instanceof WorkflowNode);
+        assert.strictEqual((items[0] as WorkflowNode).workflowName, 'Workflow 1');
+        assert.strictEqual((items[1] as WorkflowNode).workflowName, 'Workflow 2');
+    });
+
+    test('getChildren with workflow returns build runs', async () => {
+        const client = new MockClient({
+            listBuildRuns: {
+                data: [
+                    { id: 'r1', attributes: { number: 1, executionProgress: 'PENDING', completionStatus: '' } },
+                    { id: 'r2', attributes: { number: 2, executionProgress: 'RUNNING', completionStatus: '' } },
+                    { id: 'r3', attributes: { number: 3, executionProgress: 'COMPLETE', completionStatus: 'SUCCEEDED' } },
+                ]
+            }
+        });
+        const provider = new UnifiedWorkflowTreeDataProvider(client as any);
+        const workflow = new WorkflowNode('wf-1', 'Test Workflow', 'App', true);
+        const items = await provider.getChildren(workflow);
+
+        assert.strictEqual(items.length, 3);
+        assert.ok(items[0] instanceof BuildRunNode);
+        assert.strictEqual((items[0] as BuildRunNode).runNumber, 1);
+        assert.strictEqual((items[2] as BuildRunNode).runNumber, 3);
+    });
+
+    test('getChildren with build run returns build actions', async () => {
+        const client = new MockClient({
+            getBuildActions: {
+                data: [
+                    { id: 'a1', attributes: { name: 'Build Step', actionType: 'BUILD', executionProgress: 'COMPLETE', completionStatus: 'SUCCEEDED' } },
+                    { id: 'a2', attributes: { name: 'Test Step', actionType: 'TEST', executionProgress: 'RUNNING', completionStatus: '' } },
+                ]
+            }
+        });
+        const provider = new UnifiedWorkflowTreeDataProvider(client as any);
+        const buildRun = new BuildRunNode('br-1', 'wf-1', 42, 'COMPLETE', 'SUCCEEDED');
+        const items = await provider.getChildren(buildRun);
+
+        assert.strictEqual(items.length, 2);
+        assert.ok(items[0] instanceof BuildActionNode);
+        assert.strictEqual((items[0] as BuildActionNode).actionName, 'Build Step');
+        assert.strictEqual((items[1] as BuildActionNode).actionName, 'Test Step');
+    });
+
+    test('getChildren with build action returns empty (leaf)', async () => {
+        const client = new MockClient({});
+        const provider = new UnifiedWorkflowTreeDataProvider(client as any);
+        const action = new BuildActionNode('a1', 'br-1', 'Build', 'BUILD', 'COMPLETE', 'SUCCEEDED');
+        const items = await provider.getChildren(action);
+
+        assert.strictEqual(items.length, 0);
+    });
+
+    test('build run status icons', async () => {
         const client = new MockClient({
             listBuildRuns: {
                 data: [
@@ -29,23 +91,11 @@ suite('BuildRunsTreeDataProvider', () => {
                 ]
             }
         });
-        const workflows = new MockWorkflowsProvider();
-        const provider = new BuildRunsTreeDataProvider(client as any, workflows);
-        provider.refresh('wf-123');
-        const items = await provider.getChildren();
+        const provider = new UnifiedWorkflowTreeDataProvider(client as any);
+        const workflow = new WorkflowNode('wf-1', 'Test', 'App', true);
+        const items = await provider.getChildren(workflow) as BuildRunNode[];
+
         assert.strictEqual(items.length, 5);
-
-        const labels = items.map(i => i.label);
-        assert.deepStrictEqual(labels, ['#1', '#2', '#3', '#4', '#5']);
-
-        const desc = items.map(i => i.description);
-        assert.ok((desc[0] as string).includes('Pending'));
-        assert.ok((desc[1] as string).includes('Running'));
-        assert.ok((desc[2] as string).includes('Succeeded'));
-        assert.ok((desc[3] as string).includes('Failed'));
-        assert.ok((desc[4] as string).includes('Canceled'));
-
-        // Icons are ThemeIcons
         items.forEach(i => assert.ok(i.iconPath instanceof vscode.ThemeIcon));
     });
 
@@ -54,8 +104,7 @@ suite('BuildRunsTreeDataProvider', () => {
             getWorkflow: { data: { relationships: { repository: { data: { id: 'repo-1' } } } } },
             listGitReferences: { data: [{ id: 'ref-1', attributes: { name: 'main', kind: 'BRANCH' } }] }
         });
-        const workflows = new MockWorkflowsProvider();
-        const provider = new BuildRunsTreeDataProvider(client as any, workflows);
+        const provider = new UnifiedWorkflowTreeDataProvider(client as any);
         const stub = stubQuickPick({ label: 'main', description: 'BRANCH', id: 'ref-1' } as any);
         try {
             const id = await provider.pickGitReferenceId('wf-123');
@@ -68,13 +117,12 @@ suite('BuildRunsTreeDataProvider', () => {
     test('getChildren handles API error and returns empty', async () => {
         const errStub = stubErrorMessage();
         const client = new MockClient();
-        client.listBuildRuns = async () => { throw new Error('kaput'); };
-        const provider = new BuildRunsTreeDataProvider(client as any, new MockWorkflowsProvider());
-        provider.refresh('wf-123');
+        client.listAllWorkflows = async () => { throw new Error('kaput'); };
+        const provider = new UnifiedWorkflowTreeDataProvider(client as any);
         try {
             const items = await provider.getChildren();
             assert.strictEqual(items.length, 0);
-            assert.ok(errStub.calls[0]?.includes('Failed to load build runs'));
+            assert.ok(errStub.calls[0]?.includes('Failed to load tree data'));
         } finally {
             restoreAll([errStub.stub]);
         }
