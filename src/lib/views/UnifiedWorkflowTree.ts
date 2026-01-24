@@ -5,7 +5,7 @@ import { AppStoreConnectClient } from '../appstoreconnect/client';
 // Node Types
 // =======================
 
-type TreeNode = WorkflowNode | BuildRunNode | BuildActionNode;
+type TreeNode = WorkflowNode | BuildRunNode | BuildActionNode | TestResultNode;
 
 export class WorkflowNode extends vscode.TreeItem {
     readonly nodeType = 'workflow' as const;
@@ -111,9 +111,16 @@ export class BuildActionNode extends vscode.TreeItem {
         public readonly startedDate?: string,
         public readonly finishedDate?: string
     ) {
-        super(actionName, vscode.TreeItemCollapsibleState.None);
+        // Make TEST actions collapsible to show test results as children
+        const isTestAction = actionType.toUpperCase() === 'TEST';
+        const isComplete = executionProgress.toUpperCase() === 'COMPLETE';
+        const collapsibleState = isTestAction && isComplete
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.None;
 
-        this.contextValue = 'buildAction';
+        super(actionName, collapsibleState);
+
+        this.contextValue = isTestAction ? 'buildActionTest' : 'buildAction';
         this.description = this.formatStatus();
         this.iconPath = this.getStatusIcon();
         this.tooltip = this.buildTooltip();
@@ -167,6 +174,67 @@ export class BuildActionNode extends vscode.TreeItem {
     }
 }
 
+export class TestResultNode extends vscode.TreeItem {
+    readonly nodeType = 'testResult' as const;
+
+    constructor(
+        public readonly testId: string,
+        public readonly className: string,
+        public readonly testName: string,
+        public readonly status: 'passed' | 'failed' | 'skipped' | 'expectedFailure' | 'unknown',
+        public readonly duration?: number,
+        public readonly destinationName?: string,
+        public readonly message?: string
+    ) {
+        // Display test name as label, or class name if no test name
+        super(testName || className, vscode.TreeItemCollapsibleState.None);
+
+        this.contextValue = 'testResult';
+        this.description = this.formatStatus();
+        this.iconPath = this.getStatusIcon();
+        this.tooltip = this.buildTooltip();
+    }
+
+    private formatStatus(): string {
+        const parts: string[] = [];
+        if (this.duration !== undefined) {
+            parts.push(formatDuration(this.duration));
+        }
+        return parts.join(' • ') || this.status;
+    }
+
+    private getStatusIcon(): vscode.ThemeIcon {
+        switch (this.status) {
+            case 'passed':
+                return new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
+            case 'failed':
+                return new vscode.ThemeIcon('error', new vscode.ThemeColor('testing.iconFailed'));
+            case 'skipped':
+                return new vscode.ThemeIcon('debug-step-over');
+            case 'expectedFailure':
+                return new vscode.ThemeIcon('warning', new vscode.ThemeColor('testing.iconQueued'));
+            default:
+                return new vscode.ThemeIcon('circle-outline');
+        }
+    }
+
+    private buildTooltip(): vscode.MarkdownString {
+        const parts = [`**${this.testName || 'Test'}**`];
+        if (this.className) { parts.push(`Class: \`${this.className}\``); }
+        parts.push(`Status: ${this.status}`);
+        if (this.duration !== undefined) {
+            parts.push(`Duration: ${formatDuration(this.duration)}`);
+        }
+        if (this.destinationName) {
+            parts.push(`Device: ${this.destinationName}`);
+        }
+        if (this.message) {
+            parts.push(`\n---\n\n${this.message}`);
+        }
+        return new vscode.MarkdownString(parts.join('\n\n'));
+    }
+}
+
 // =======================
 // Unified TreeDataProvider
 // =======================
@@ -214,7 +282,12 @@ export class UnifiedWorkflowTreeDataProvider implements vscode.TreeDataProvider<
                 return this.getBuildActions(element);
             }
 
-            // Build action node: no children (leaf)
+            // Build action node (TEST type): return test results
+            if (element.nodeType === 'buildAction' && element.actionType.toUpperCase() === 'TEST') {
+                return this.getTestResults(element);
+            }
+
+            // Test result node: no children (leaf)
             return [];
         } catch (err: any) {
             vscode.window.showErrorMessage(`Failed to load tree data: ${err?.message || String(err)}`);
@@ -314,6 +387,48 @@ export class UnifiedWorkflowTreeDataProvider implements vscode.TreeDataProvider<
                 attrs.completionStatus || '',
                 attrs.startedDate,
                 attrs.finishedDate
+            );
+        });
+    }
+
+    private async getTestResults(buildAction: BuildActionNode): Promise<TestResultNode[]> {
+        const response = await this.client.getTestResults(buildAction.actionId, { limit: 100 });
+        const results = response?.data || [];
+
+        if (results.length === 0) {
+            // Return a placeholder if no test results
+            return [new TestResultNode(
+                'no-results',
+                '',
+                'No test results available',
+                'unknown'
+            )];
+        }
+
+        return results.map((result: any) => {
+            const attrs = result?.attributes || {};
+
+            // Map API status to our status type
+            let status: 'passed' | 'failed' | 'skipped' | 'expectedFailure' | 'unknown' = 'unknown';
+            const apiStatus = (attrs.status || '').toUpperCase();
+            if (apiStatus === 'SUCCESS' || apiStatus === 'PASSED') {
+                status = 'passed';
+            } else if (apiStatus === 'FAILURE' || apiStatus === 'FAILED') {
+                status = 'failed';
+            } else if (apiStatus === 'SKIPPED') {
+                status = 'skipped';
+            } else if (apiStatus === 'EXPECTED_FAILURE') {
+                status = 'expectedFailure';
+            }
+
+            return new TestResultNode(
+                result.id,
+                attrs.className || '',
+                attrs.name || attrs.className || 'Unknown Test',
+                status,
+                attrs.duration,
+                attrs.destinationDisplayName,
+                attrs.message
             );
         });
     }

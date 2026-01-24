@@ -236,6 +236,15 @@ export class AppStoreConnectClient {
         return this.get(`/ciBuildRuns/${buildRunId}`);
     }
 
+    // Xcode Cloud: get test results for a test action
+    async getTestResults(actionId: string, options?: { limit?: number }) {
+        const query: Record<string, string> = {};
+        if (options?.limit) {
+            query['limit'] = String(options.limit);
+        }
+        return this.get(`/ciBuildActions/${actionId}/testResults`, query);
+    }
+
     // ==========================
     // Generic HTTP Methods
     // ==========================
