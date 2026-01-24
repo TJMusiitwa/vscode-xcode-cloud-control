@@ -97,7 +97,9 @@ export class AppStoreConnectClient {
                     return workflows.map((wf: any) => ({
                         ...wf,
                         _productId: product.id,
-                        _productName: product?.attributes?.name || 'Unknown'
+                        _productName: product?.attributes?.name || 'Unknown',
+                        // CiProduct relationship 'app' 'data' 'id' is the App Store ID (e.g. 1560000000)
+                        _appId: product?.relationships?.app?.data?.id
                     }));
                 })
                 .catch(() => []) // Ignore errors for individual products
