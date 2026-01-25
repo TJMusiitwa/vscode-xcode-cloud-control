@@ -26,6 +26,11 @@ export class WorkflowNode extends vscode.TreeItem {
             `Product: ${productName}\n\n` +
             `Status: ${isEnabled ? 'Enabled' : 'Disabled'}`
         );
+        this.command = {
+            command: 'xcodecloud.viewWorkflowDetails',
+            title: 'View Workflow Details',
+            arguments: [this]
+        };
     }
 }
 

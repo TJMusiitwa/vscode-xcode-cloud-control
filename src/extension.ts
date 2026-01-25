@@ -30,10 +30,27 @@ export async function activate(context: vscode.ExtensionContext) {
 	statusBarItem.tooltip = 'Xcode Cloud Build Status';
 	updateStatusBar();
 
+	// Create and register tree providers
+	const workflowsTreeView = vscode.window.createTreeView('xcodecloudWorkflowRuns', {
+		treeDataProvider: unifiedProvider,
+		showCollapseAll: true
+	});
+
 	context.subscriptions.push(
 		statusBarItem,
-		vscode.window.registerTreeDataProvider('xcodecloudWorkflowRuns', unifiedProvider),
+		workflowsTreeView,
 		vscode.window.registerTreeDataProvider('xcodecloudWorkflowDetails', workflowDetailsProvider),
+
+		// Listen for selection changes to update details
+		workflowsTreeView.onDidChangeSelection(e => {
+			const selected = e.selection[0];
+			if (selected && selected.nodeType === 'workflow') {
+				workflowDetailsProvider?.setWorkflow(selected.workflowId, selected.workflowName);
+			} else if (selected && selected.nodeType === 'buildRun') {
+				// Also update details when a build run is selected (shows its parent workflow)
+				workflowDetailsProvider?.setWorkflow(selected.workflowId);
+			}
+		}),
 
 		// Configure credentials
 		vscode.commands.registerCommand('xcodecloud.configureCredentials', async () => {
