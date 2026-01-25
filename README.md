@@ -16,8 +16,10 @@ A Visual Studio Code extension to **manage, monitor, and trigger Xcode Cloud bui
 - **Workflow Details**: Dedicated view showing comprehensive metadata, repository links, and build frequency.
 
 ### 🔨 Build Monitoring & Analysis
-- **Unified Tree View**: A hierarchical view (Workflows → Build Runs → Build Actions → Test Results).
+- **Unified Tree View**: A hierarchical view (Workflows → Build Runs → Build Actions → Issues & Test Results).
+- **Issue Reporting**: Drill down into any build action to see identified issues, including `ANALYZER_WARNING`, `ERROR`, `TEST_FAILURE`, and `WARNING`.
 - **Test Results Integration**: Drill down into specific test actions to see individual test class results (Passed, Failed, Skipped) with failure messages and durations.
+- **Detailed Diagnostics**: View file locations and line numbers for build issues directly in the tree view tooltips.
 - **Real-time Status**: Automatic polling with instant desktop notifications for build completions, failures, or cancellations.
 - **Status Bar Integration**: At-a-glance status of active builds in your VS Code status bar.
 - **Custom Sorting**: Toggle between newest-first and oldest-first build run views.
@@ -25,7 +27,7 @@ A Visual Studio Code extension to **manage, monitor, and trigger Xcode Cloud bui
 ### 📊 Build Actions & Logs
 - **Action Inspection**: Inspect individual build steps (actions) and their specific status.
 - **Timing & Progress**: View detailed start times, durations, and execution progress.
-- **Log Access**: Fast links to specific build summaries and issue reports.
+- **Diagnostic Reporting**: Access detailed issue reports and logs directly from build actions.
 
 ### 🎛️ Quick Actions
 - **Trigger Build**: Start new builds with smart branch/tag/pull-request discovery.
@@ -59,7 +61,8 @@ Your credentials are stored securely using VS Code's **Secret Storage** (OS keyc
 
 1. Expand a workflow to see its **Build Runs**.
 2. Expand a build run to see its **Build Actions**.
-3. For **TEST** actions, expand them further to see individual **Test Results** including failure details.
+3. Expand any finished action to see **Issues** (Errors, Warnings, Analyzer results).
+4. For **TEST** actions, expand them further to see individual **Test Results** including failure details.
 
 ## ⚙️ Commands
 
@@ -90,6 +93,7 @@ This extension utilizes the [App Store Connect API v1](https://developer.apple.c
 - `GET /v1/ciBuildRuns` - Build history and tracking.
 - `GET /v1/ciBuildActions` - Action/step monitoring.
 - `GET /v1/ciBuildActions/{id}/testResults` - Individual test result analysis.
+- `GET /v1/ciBuildActions/{id}/issues` - Xcode Cloud build issues reporting.
 - `GET /v1/scmRepositories` & `/v1/scmGitReferences` - Repository and branch management.
 
 ## 🤝 Contributing
