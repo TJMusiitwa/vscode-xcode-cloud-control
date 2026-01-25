@@ -10,6 +10,8 @@ class MockClient {
     async getBuildActions(_: string): Promise<any> { return this.responses.getBuildActions; }
     async getWorkflow(_: string): Promise<any> { return this.responses.getWorkflow; }
     async listGitReferences(_: string): Promise<any> { return this.responses.listGitReferences; }
+    async getIssues(_: string): Promise<any> { return this.responses.getIssues || { data: [] }; }
+    async getTestResults(_: string): Promise<any> { return this.responses.getTestResults || { data: [] }; }
 }
 
 suite('UnifiedWorkflowTreeDataProvider', () => {
@@ -47,8 +49,9 @@ suite('UnifiedWorkflowTreeDataProvider', () => {
 
         assert.strictEqual(items.length, 3);
         assert.ok(items[0] instanceof BuildRunNode);
-        assert.strictEqual((items[0] as BuildRunNode).runNumber, 1);
-        assert.strictEqual((items[2] as BuildRunNode).runNumber, 3);
+        // Default sort is 'desc' (newest first), so run 3 is first
+        assert.strictEqual((items[0] as BuildRunNode).runNumber, 3);
+        assert.strictEqual((items[2] as BuildRunNode).runNumber, 1);
     });
 
     test('getChildren with build run returns build actions', async () => {
@@ -70,13 +73,14 @@ suite('UnifiedWorkflowTreeDataProvider', () => {
         assert.strictEqual((items[1] as BuildActionNode).actionName, 'Test Step');
     });
 
-    test('getChildren with build action returns empty (leaf)', async () => {
+    test('getChildren with build action returns issues (or placeholder)', async () => {
         const client = new MockClient({});
         const provider = new UnifiedWorkflowTreeDataProvider(client as any);
         const action = new BuildActionNode('a1', 'br-1', 'Build', 'BUILD', 'COMPLETE', 'SUCCEEDED');
         const items = await provider.getChildren(action);
 
-        assert.strictEqual(items.length, 0);
+        // With no issues from API, should return placeholder
+        assert.strictEqual(items.length, 1);
     });
 
     test('build run status icons', async () => {

@@ -181,3 +181,30 @@ export interface CiWorkflowResponse {
         relationships?: Record<string, any>;
     };
 }
+
+// ======================
+// Issue Types
+// ======================
+
+export type CiIssueType = 'ANALYZER_WARNING' | 'ERROR' | 'TEST_FAILURE' | 'WARNING';
+
+export interface CiIssue {
+    id: string;
+    type: 'ciIssues';
+    attributes: {
+        issueType: CiIssueType;
+        message?: string;
+        category?: string | null;
+        fileSource?: {
+            path?: string;
+            lineNumber?: number;
+        };
+    };
+    links?: {
+        self?: string;
+    };
+}
+
+export interface CiIssuesResponse {
+    data: CiIssue[];
+}

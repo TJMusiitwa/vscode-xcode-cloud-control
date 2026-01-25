@@ -5,7 +5,7 @@ import { AppStoreConnectClient } from '../appstoreconnect/client';
 // Node Types
 // =======================
 
-type TreeNode = WorkflowNode | BuildRunNode | BuildActionNode | TestResultNode;
+type TreeNode = WorkflowNode | BuildRunNode | BuildActionNode | TestResultNode | IssueNode;
 
 export class WorkflowNode extends vscode.TreeItem {
     readonly nodeType = 'workflow' as const;
@@ -111,10 +111,10 @@ export class BuildActionNode extends vscode.TreeItem {
         public readonly startedDate?: string,
         public readonly finishedDate?: string
     ) {
-        // Make TEST actions collapsible to show test results as children
+        // All completed actions are collapsible to show issues; TEST actions also show test results
         const isTestAction = actionType.toUpperCase() === 'TEST';
         const isComplete = executionProgress.toUpperCase() === 'COMPLETE';
-        const collapsibleState = isTestAction && isComplete
+        const collapsibleState = isComplete
             ? vscode.TreeItemCollapsibleState.Collapsed
             : vscode.TreeItemCollapsibleState.None;
 
@@ -235,6 +235,54 @@ export class TestResultNode extends vscode.TreeItem {
     }
 }
 
+export class IssueNode extends vscode.TreeItem {
+    readonly nodeType = 'issue' as const;
+
+    constructor(
+        public readonly issueId: string,
+        public readonly issueType: 'ANALYZER_WARNING' | 'ERROR' | 'TEST_FAILURE' | 'WARNING',
+        public readonly message: string,
+        public readonly selfLink?: string,
+        public readonly filePath?: string,
+        public readonly lineNumber?: number
+    ) {
+        super(message || 'Unknown Issue', vscode.TreeItemCollapsibleState.None);
+
+        this.contextValue = 'issue';
+        this.description = this.formatIssueType();
+        this.iconPath = this.getIssueIcon();
+        this.tooltip = this.buildTooltip();
+    }
+
+    private formatIssueType(): string {
+        // Convert ANALYZER_WARNING -> Analyzer Warning, etc.
+        return this.issueType.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    private getIssueIcon(): vscode.ThemeIcon {
+        switch (this.issueType) {
+            case 'ERROR':
+            case 'TEST_FAILURE':
+                return new vscode.ThemeIcon('error', new vscode.ThemeColor('testing.iconFailed'));
+            case 'WARNING':
+            case 'ANALYZER_WARNING':
+                return new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground'));
+            default:
+                return new vscode.ThemeIcon('info', new vscode.ThemeColor('editorInfo.foreground'));
+        }
+    }
+
+    private buildTooltip(): vscode.MarkdownString {
+        const parts = [`**${this.formatIssueType()}**`];
+        if (this.message) { parts.push(`\n---\n\n${this.message}`); }
+        if (this.filePath) {
+            const location = this.lineNumber ? `${this.filePath}:${this.lineNumber}` : this.filePath;
+            parts.push(`\nLocation: \`${location}\``);
+        }
+        return new vscode.MarkdownString(parts.join('\n\n'));
+    }
+}
+
 // =======================
 // Unified TreeDataProvider
 // =======================
@@ -269,22 +317,22 @@ export class UnifiedWorkflowTreeDataProvider implements vscode.TreeDataProvider<
         try {
             // Root level: return all workflows
             if (!element) {
-                return this.getWorkflows();
+                return await this.getWorkflows();
             }
 
             // Workflow node: return build runs
             if (element.nodeType === 'workflow') {
-                return this.getBuildRuns(element);
+                return await this.getBuildRuns(element);
             }
 
             // Build run node: return build actions
             if (element.nodeType === 'buildRun') {
-                return this.getBuildActions(element);
+                return await this.getBuildActions(element);
             }
 
-            // Build action node (TEST type): return test results
-            if (element.nodeType === 'buildAction' && element.actionType.toUpperCase() === 'TEST') {
-                return this.getTestResults(element);
+            // Build action node: return test results (for TEST) and/or issues
+            if (element.nodeType === 'buildAction') {
+                return await this.getBuildActionChildren(element);
             }
 
             // Test result node: no children (leaf)
@@ -431,6 +479,53 @@ export class UnifiedWorkflowTreeDataProvider implements vscode.TreeDataProvider<
                 attrs.message
             );
         });
+    }
+
+    private async getBuildActionChildren(buildAction: BuildActionNode): Promise<(TestResultNode | IssueNode)[]> {
+        const children: (TestResultNode | IssueNode)[] = [];
+
+        // Fetch test results for TEST actions
+        if (buildAction.actionType.toUpperCase() === 'TEST') {
+            const testResults = await this.getTestResults(buildAction);
+            // Filter out placeholder nodes
+            const validResults = testResults.filter(r => r.testId !== 'no-results');
+            children.push(...validResults);
+        }
+
+        // Fetch issues for all action types
+        const issues = await this.getIssues(buildAction);
+        children.push(...issues);
+
+        // Return placeholder if no children
+        if (children.length === 0) {
+            return [new IssueNode('no-issues', 'WARNING', 'No issues found')];
+        }
+
+        return children;
+    }
+
+    private async getIssues(buildAction: BuildActionNode): Promise<IssueNode[]> {
+        try {
+            const response = await this.client.getIssues(buildAction.actionId, { limit: 100 });
+            const issues = response?.data || [];
+
+            return issues.map((issue: any) => {
+                const attrs = issue?.attributes || {};
+                const issueType = (attrs.issueType || 'ERROR') as 'ANALYZER_WARNING' | 'ERROR' | 'TEST_FAILURE' | 'WARNING';
+
+                return new IssueNode(
+                    issue.id,
+                    issueType,
+                    attrs.message || 'No message',
+                    issue.links?.self,
+                    attrs.fileSource?.path,
+                    attrs.fileSource?.lineNumber
+                );
+            });
+        } catch {
+            // Return empty array on error - issues are optional
+            return [];
+        }
     }
 }
 
