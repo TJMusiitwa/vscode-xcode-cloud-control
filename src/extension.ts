@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { AppStoreConnectClient } from './lib/appstoreconnect/client';
 import { BuildMonitor } from './lib/buildMonitor';
 import { ensureCredentials } from './lib/credentials';
-import { BuildRunNode, UnifiedWorkflowTreeDataProvider, WorkflowNode } from './lib/views/UnifiedWorkflowTree';
+import { BuildActionNode, BuildRunNode, UnifiedWorkflowTreeDataProvider, WorkflowNode } from './lib/views/UnifiedWorkflowTree';
 import { WorkflowDetailsTreeDataProvider } from './lib/views/WorkflowDetailsTree';
 import { WorkflowEditorPanel } from './lib/views/WorkflowEditorPanel';
 
@@ -11,9 +11,13 @@ let unifiedProvider: UnifiedWorkflowTreeDataProvider | null = null;
 let workflowDetailsProvider: WorkflowDetailsTreeDataProvider | null = null;
 let buildMonitor: BuildMonitor | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
+let logsOutputChannel: vscode.OutputChannel | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
 	client = new AppStoreConnectClient(context.secrets);
+
+	// Create output channel for build logs
+	logsOutputChannel = vscode.window.createOutputChannel('Xcode Cloud Logs');
 
 	unifiedProvider = new UnifiedWorkflowTreeDataProvider(client);
 	workflowDetailsProvider = new WorkflowDetailsTreeDataProvider(client);
@@ -38,6 +42,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		statusBarItem,
+		logsOutputChannel,
 		workflowsTreeView,
 		vscode.window.registerTreeDataProvider('xcodecloudWorkflowDetails', workflowDetailsProvider),
 
@@ -110,6 +115,111 @@ export async function activate(context: vscode.ExtensionContext) {
 				updateStatusBar();
 			} catch (err: any) {
 				vscode.window.showErrorMessage(`Failed to cancel build: ${err?.message || String(err)}`);
+			}
+		}),
+
+		// View build logs
+		vscode.commands.registerCommand('xcodecloud.viewBuildLogs', async (buildActionNode?: BuildActionNode) => {
+			if (!client || !logsOutputChannel) { return; }
+
+			try {
+				let actionId: string | undefined;
+				let actionName: string | undefined;
+
+				if (buildActionNode?.actionId) {
+					actionId = buildActionNode.actionId;
+					actionName = buildActionNode.actionName;
+				} else {
+					// If no node provided, let user select from tree
+					vscode.window.showWarningMessage('Select a build action to view its logs.');
+					return;
+				}
+
+				// Show output channel
+				logsOutputChannel.clear();
+				logsOutputChannel.show(true);
+				logsOutputChannel.appendLine(`Fetching logs for: ${actionName || 'Build Action'}`);
+				logsOutputChannel.appendLine(`Action ID: ${actionId}`);
+				logsOutputChannel.appendLine('='.repeat(80));
+				logsOutputChannel.appendLine('');
+
+				// Fetch artifacts for this build action
+				const artifactsResponse = await client.getBuildActionArtifacts(actionId);
+				const artifacts = artifactsResponse?.data || [];
+
+				if (artifacts.length === 0) {
+					logsOutputChannel.appendLine('No artifacts (logs) found for this build action.');
+					logsOutputChannel.appendLine('');
+					logsOutputChannel.appendLine('Note: Logs may not be available for actions that are:');
+					logsOutputChannel.appendLine('  - Still running or pending');
+					logsOutputChannel.appendLine('  - Skipped or canceled');
+					logsOutputChannel.appendLine('  - Too old (logs are retained for a limited time)');
+					return;
+				}
+
+				// Find log artifacts (typically named like "build-log", "test-log", etc.)
+				const logArtifacts = artifacts.filter((artifact: any) => {
+					const fileType = artifact?.attributes?.fileType || '';
+					const name = artifact?.attributes?.fileName || '';
+					return fileType.toLowerCase() === 'log' || name.toLowerCase().includes('log');
+				});
+
+				if (logArtifacts.length === 0) {
+					logsOutputChannel.appendLine(`Found ${artifacts.length} artifact(s), but none are log files.`);
+					logsOutputChannel.appendLine('');
+					logsOutputChannel.appendLine('Available artifacts:');
+					for (const artifact of artifacts) {
+						const name = artifact?.attributes?.fileName || 'Unknown';
+						const type = artifact?.attributes?.fileType || 'Unknown';
+						logsOutputChannel.appendLine(`  - ${name} (${type})`);
+					}
+					return;
+				}
+
+				// Download and display each log artifact
+				for (const artifact of logArtifacts) {
+					const artifactId = artifact.id;
+					const fileName = artifact?.attributes?.fileName || 'log';
+					const sizeBytes = artifact?.attributes?.fileSizeBytes || 0;
+
+					if (!logsOutputChannel) { return; }
+					logsOutputChannel.appendLine(`\n📄 ${fileName} (${formatFileSize(sizeBytes)})`);
+					logsOutputChannel.appendLine('-'.repeat(80));
+
+					try {
+						// Get download URL
+						const artifactDetails = await client.getArtifact(artifactId);
+						const downloadUrl = artifactDetails?.data?.attributes?.downloadUrl;
+
+						if (!downloadUrl) {
+							logsOutputChannel.appendLine('Error: Download URL not available for this artifact.');
+							continue;
+						}
+
+						// Download log content
+						logsOutputChannel.appendLine('Downloading...');
+						const logContent = await client.downloadArtifactContent(downloadUrl);
+
+						// Display log content
+						logsOutputChannel.appendLine('');
+						logsOutputChannel.appendLine(logContent);
+						logsOutputChannel.appendLine('');
+						logsOutputChannel.appendLine('-'.repeat(80));
+
+					} catch (err: any) {
+						logsOutputChannel.appendLine(`Error downloading ${fileName}: ${err?.message || String(err)}`);
+					}
+				}
+
+				logsOutputChannel.appendLine('');
+				logsOutputChannel.appendLine('='.repeat(80));
+				logsOutputChannel.appendLine('✅ Logs loaded successfully');
+
+			} catch (err: any) {
+				logsOutputChannel?.appendLine('');
+				logsOutputChannel?.appendLine('❌ Error fetching logs:');
+				logsOutputChannel?.appendLine(err?.message || String(err));
+				vscode.window.showErrorMessage(`Failed to fetch logs: ${err?.message || String(err)}`);
 			}
 		}),
 
@@ -290,4 +400,13 @@ async function updateStatusBar() {
 export function deactivate() {
 	buildMonitor?.dispose();
 	statusBarItem?.dispose();
+	logsOutputChannel?.dispose();
+}
+
+function formatFileSize(bytes: number): string {
+	if (bytes === 0) { return '0 B'; }
+	const k = 1024;
+	const sizes = ['B', 'KB', 'MB', 'GB'];
+	const i = Math.floor(Math.log(bytes) / Math.log(k));
+	return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }

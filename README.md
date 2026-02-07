@@ -27,6 +27,8 @@ A Visual Studio Code extension to **manage, monitor, and trigger Xcode Cloud bui
 ### 📊 Build Actions & Logs
 - **Action Inspection**: Inspect individual build steps (actions) and their specific status.
 - **Timing & Progress**: View detailed start times, durations, and execution progress.
+- **Build Logs Viewer**: View detailed build logs for any completed build action directly in VS Code, similar to GitHub Actions or CircleCI.
+- **Real-time Log Access**: Download and display logs from Xcode Cloud artifacts with automatic file size formatting.
 - **Diagnostic Reporting**: Access detailed issue reports and logs directly from build actions.
 
 ### 🎛️ Quick Actions
@@ -61,8 +63,9 @@ Your credentials are stored securely using VS Code's **Secret Storage** (OS keyc
 
 1. Expand a workflow to see its **Build Runs**.
 2. Expand a build run to see its **Build Actions**.
-3. Expand any finished action to see **Issues** (Errors, Warnings, Analyzer results).
-4. For **TEST** actions, expand them further to see individual **Test Results** including failure details.
+3. Right-click any completed build action and select **"View Build Logs"** to see the full logs in the Output panel.
+4. Expand any finished action to see **Issues** (Errors, Warnings, Analyzer results).
+5. For **TEST** actions, expand them further to see individual **Test Results** including failure details.
 
 ## ⚙️ Commands
 
@@ -74,6 +77,7 @@ Your credentials are stored securely using VS Code's **Secret Storage** (OS keyc
 | `Xcode Cloud: Delete Workflow` | Permanently remove a workflow |
 | `Xcode Cloud: Trigger Build` | Start a new build with ref selection |
 | `Xcode Cloud: Cancel Build` | Stop an active build run |
+| `Xcode Cloud: View Build Logs` | Display detailed logs for a build action |
 | `Xcode Cloud: View Workflow Details` | Show metadata in the details panel |
 | `Xcode Cloud: Toggle Sort Order` | Switch between ASC/DESC build history |
 | `Xcode Cloud: Open in App Store Connect` | Open the dashboard in your browser |
@@ -92,6 +96,8 @@ This extension utilizes the [App Store Connect API v1](https://developer.apple.c
 - `GET /v1/ciWorkflows` - Workflow CRUD operations.
 - `GET /v1/ciBuildRuns` - Build history and tracking.
 - `GET /v1/ciBuildActions` - Action/step monitoring.
+- `GET /v1/ciBuildActions/{id}/artifacts` - Fetch build artifacts and logs.
+- `GET /v1/ciArtifacts/{id}` - Get artifact download URLs.
 - `GET /v1/ciBuildActions/{id}/testResults` - Individual test result analysis.
 - `GET /v1/ciBuildActions/{id}/issues` - Xcode Cloud build issues reporting.
 - `GET /v1/scmRepositories` & `/v1/scmGitReferences` - Repository and branch management.

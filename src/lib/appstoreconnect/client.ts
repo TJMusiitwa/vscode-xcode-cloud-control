@@ -231,6 +231,16 @@ export class AppStoreConnectClient {
         return this.get(`/ciArtifacts/${artifactId}`);
     }
 
+    // Xcode Cloud: download artifact content (logs) from a download URL
+    async downloadArtifactContent(downloadUrl: string): Promise<string> {
+        const res = await request(downloadUrl, { method: 'GET' });
+        if (res.statusCode >= 400) {
+            const body = await res.body.text();
+            throw new Error(`Failed to download artifact (${res.statusCode}): ${body}`);
+        }
+        return await res.body.text();
+    }
+
     // Get a single build run
     async getBuildRun(buildRunId: string) {
         return this.get(`/ciBuildRuns/${buildRunId}`);
