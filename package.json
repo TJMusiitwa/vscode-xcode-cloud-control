@@ -175,6 +175,11 @@
           "group": "1_actions@1"
         },
         {
+          "command": "xcodecloud.viewBuildLogs",
+          "when": "view == xcodecloudWorkflowRuns && (viewItem == buildRunActive || viewItem == buildRunComplete)",
+          "group": "1_actions@2"
+        },
+        {
           "command": "xcodecloud.openInBrowser",
           "when": "view == xcodecloudWorkflowRuns",
           "group": "2_navigation@1"
@@ -193,6 +198,11 @@
           "command": "xcodecloud.deleteWorkflow",
           "when": "view == xcodecloudWorkflowRuns && viewItem == workflow",
           "group": "3_danger@1"
+        },
+        {
+          "command": "xcodecloud.viewBuildLogs",
+          "when": "view == xcodecloudWorkflowRuns && (viewItem == buildAction || viewItem == buildActionTest)",
+          "group": "inline"
         }
       ]
     }

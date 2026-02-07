@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { AppStoreConnectClient } from './lib/appstoreconnect/client';
 import { BuildMonitor } from './lib/buildMonitor';
 import { ensureCredentials } from './lib/credentials';
-import { BuildRunNode, UnifiedWorkflowTreeDataProvider, WorkflowNode } from './lib/views/UnifiedWorkflowTree';
+import { BuildActionNode, BuildRunNode, UnifiedWorkflowTreeDataProvider, WorkflowNode } from './lib/views/UnifiedWorkflowTree';
+import { filterLogArtifacts } from './lib/views/BuildLogsPanel';
 import { WorkflowDetailsTreeDataProvider } from './lib/views/WorkflowDetailsTree';
 import { WorkflowEditorPanel } from './lib/views/WorkflowEditorPanel';
 
@@ -11,12 +12,20 @@ let unifiedProvider: UnifiedWorkflowTreeDataProvider | null = null;
 let workflowDetailsProvider: WorkflowDetailsTreeDataProvider | null = null;
 let buildMonitor: BuildMonitor | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
+let logChannel: vscode.OutputChannel | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
 	client = new AppStoreConnectClient(context.secrets);
 
 	unifiedProvider = new UnifiedWorkflowTreeDataProvider(client);
 	workflowDetailsProvider = new WorkflowDetailsTreeDataProvider(client);
+	const ensureLogChannel = () => {
+		if (!logChannel) {
+			logChannel = vscode.window.createOutputChannel('Xcode Cloud Logs');
+			context.subscriptions.push(logChannel);
+		}
+		return logChannel;
+	};
 
 	// Initialize build monitor for notifications
 	buildMonitor = new BuildMonitor(client, () => {
@@ -110,6 +119,108 @@ export async function activate(context: vscode.ExtensionContext) {
 				updateStatusBar();
 			} catch (err: any) {
 				vscode.window.showErrorMessage(`Failed to cancel build: ${err?.message || String(err)}`);
+			}
+		}),
+
+		// View build logs (artifacts)
+		vscode.commands.registerCommand('xcodecloud.viewBuildLogs', async (node?: BuildRunNode | BuildActionNode) => {
+			if (!client) { return; }
+			const activeClient = client;
+
+			const pickBuildRun = async (): Promise<{ id: string; label: string } | undefined> => {
+				const recent = await activeClient.listAllRecentBuilds({ limit: 20 });
+				const items = (recent?.data || []).map((run: any) => {
+					const attrs = run?.attributes || {};
+					const label = `#${attrs.number || run.id.slice(-6)}`;
+					const status = attrs.executionProgress || attrs.completionStatus || '';
+					return { label, description: status, id: run.id };
+				});
+				if (items.length === 0) {
+					vscode.window.showWarningMessage('No recent builds found.');
+					return undefined;
+				}
+				return vscode.window.showQuickPick(items, { placeHolder: 'Select a build run' }) as any;
+			};
+
+			const pickAction = async (buildRunId: string, preselectName?: string): Promise<{ id: string; label: string } | undefined> => {
+				const resp = await activeClient.getBuildActions(buildRunId);
+				const actions = resp?.data || [];
+				if (actions.length === 0) {
+					vscode.window.showWarningMessage('No build actions available yet for this run.');
+					return undefined;
+				}
+				const items = actions.map((action: any) => {
+					const attrs = action?.attributes || {};
+					const label = attrs.name || 'Unknown Action';
+					const description = attrs.executionProgress || attrs.completionStatus || '';
+					return { label, description, id: action.id };
+				});
+				if (preselectName) {
+					const found = items.find((i: { label: string }) => i.label === preselectName);
+					if (found) { return found; }
+				}
+				return vscode.window.showQuickPick(items, { placeHolder: 'Select a build action' }) as any;
+			};
+
+			const pickLogArtifact = async (actionId: string) => {
+				const artifactsResp = await activeClient.getBuildActionArtifacts(actionId);
+				const candidates = filterLogArtifacts(artifactsResp?.data || []);
+				if (candidates.length === 0) {
+					vscode.window.showWarningMessage('No log artifacts are available for this action yet.');
+					return undefined;
+				}
+				if (candidates.length === 1) { return candidates[0]; }
+
+					const items = candidates.map((artifact: any) => ({
+						label: artifact?.attributes?.fileName || 'Log artifact',
+						description: artifact?.attributes?.fileType || '',
+						id: artifact.id
+					}));
+					const choice = await vscode.window.showQuickPick(items, { placeHolder: 'Select a log artifact' }) as any;
+					if (!choice) { return undefined; }
+					return candidates.find((c: any) => c.id === choice?.id) || candidates[0];
+				};
+
+			try {
+				let buildRunId = node && 'buildRunId' in node ? node.buildRunId : undefined;
+				let buildLabel = node && 'runNumber' in node ? `#${node.runNumber}` : undefined;
+
+				if (!buildRunId) {
+					const picked = await pickBuildRun();
+					if (!picked) { return; }
+					buildRunId = picked.id;
+					buildLabel = picked.label;
+				}
+
+				let action: { id: string; label: string } | undefined;
+				if (node && 'actionId' in node) {
+					action = { id: node.actionId, label: node.actionName };
+				} else if (buildRunId) {
+					action = await pickAction(buildRunId);
+				}
+
+				if (!action || !buildRunId) { return; }
+
+				await vscode.window.withProgress({
+					location: vscode.ProgressLocation.Notification,
+					title: 'Fetching Xcode Cloud build logs...'
+					}, async () => {
+						const artifact = await pickLogArtifact(action!.id);
+						if (!artifact) { return; }
+
+						const downloaded = await activeClient.downloadArtifactContent(artifact.id);
+						const channel = ensureLogChannel();
+					channel.clear();
+					channel.appendLine(`Build: ${buildLabel || buildRunId}`);
+					channel.appendLine(`Action: ${action!.label}`);
+					channel.appendLine(`Artifact: ${downloaded.fileName || artifact?.attributes?.fileName || artifact.id}`);
+					channel.appendLine(`Fetched: ${new Date().toLocaleString()}`);
+					channel.appendLine('------------------------------');
+					channel.append(downloaded.content || '');
+					channel.show(true);
+				});
+			} catch (err: any) {
+				vscode.window.showErrorMessage(`Failed to load build logs: ${err?.message || String(err)}`);
 			}
 		}),
 

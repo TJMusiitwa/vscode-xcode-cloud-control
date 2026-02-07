@@ -231,6 +231,28 @@ export class AppStoreConnectClient {
         return this.get(`/ciArtifacts/${artifactId}`);
     }
 
+    async downloadArtifactContent(artifactId: string): Promise<{ content: string; fileName?: string; downloadUrl?: string; contentType?: string }> {
+        const artifact = await this.getArtifact(artifactId);
+        const attrs = artifact?.data?.attributes || {};
+        const downloadUrl = attrs?.downloadUrl || attrs?.fileUrl || attrs?.url;
+
+        if (!downloadUrl) {
+            throw new Error('No download URL available for this artifact.');
+        }
+
+        const res = await request(downloadUrl, { method: 'GET' });
+        if (res.statusCode >= 400) {
+            const body = await res.body.text();
+            throw new Error(`Download failed (${res.statusCode}): ${body}`);
+        }
+
+        const content = await res.body.text();
+        const contentTypeHeader = res.headers['content-type'];
+        const contentType = Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader;
+
+        return { content, fileName: attrs?.fileName, downloadUrl, contentType };
+    }
+
     // Get a single build run
     async getBuildRun(buildRunId: string) {
         return this.get(`/ciBuildRuns/${buildRunId}`);

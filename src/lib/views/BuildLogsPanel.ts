@@ -203,6 +203,20 @@ export class BuildActionItem extends vscode.TreeItem {
     }
 }
 
+export function filterLogArtifacts(artifacts: any[]): any[] {
+    return (artifacts || []).filter(isLogArtifact);
+}
+
+function isLogArtifact(artifact: any): boolean {
+    const attrs = artifact?.attributes || {};
+    const fileType = (attrs.fileType || '').toUpperCase();
+    const fileName = (attrs.fileName || '').toLowerCase();
+
+    if (fileType.includes('LOG')) { return true; }
+    if (fileName.endsWith('.log') || fileName.endsWith('.txt')) { return true; }
+    return false;
+}
+
 function formatDuration(seconds: number): string {
     if (seconds < 60) { return `${Math.round(seconds)}s`; }
     const mins = Math.floor(seconds / 60);
