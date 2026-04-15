@@ -5,6 +5,8 @@ import { ensureCredentials } from './lib/credentials';
 import { BuildRunNode, UnifiedWorkflowTreeDataProvider, WorkflowNode } from './lib/views/UnifiedWorkflowTree';
 import { WorkflowDetailsTreeDataProvider } from './lib/views/WorkflowDetailsTree';
 import { WorkflowEditorPanel } from './lib/views/WorkflowEditorPanel';
+import { TimelineTreeDataProvider, TimelineGenerator, TimelineLoader } from './lib/timeline';
+import { logger } from './lib/logger';
 
 let client: AppStoreConnectClient | null = null;
 let unifiedProvider: UnifiedWorkflowTreeDataProvider | null = null;
@@ -36,9 +38,16 @@ export async function activate(context: vscode.ExtensionContext) {
 		showCollapseAll: true
 	});
 
+	const timelineProvider = new TimelineTreeDataProvider();
+	const timelineTreeView = vscode.window.createTreeView('xcodecloudBuildTimeline', {
+		treeDataProvider: timelineProvider,
+		showCollapseAll: true
+	});
+
 	context.subscriptions.push(
 		statusBarItem,
 		workflowsTreeView,
+		timelineTreeView,
 		vscode.window.registerTreeDataProvider('xcodecloudWorkflowDetails', workflowDetailsProvider),
 
 		// Listen for selection changes to update details
@@ -49,6 +58,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			} else if (selected && selected.nodeType === 'buildRun') {
 				// Also update details when a build run is selected (shows its parent workflow)
 				workflowDetailsProvider?.setWorkflow(selected.workflowId);
+
+				// Auto-load timeline if it's complete
+				if (selected.contextValue === 'buildRunComplete') {
+					vscode.commands.executeCommand('xcodecloud.loadTimeline', selected);
+				}
 			}
 		}),
 
@@ -81,7 +95,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				const buildId = buildRun?.id;
 				if (buildId) {
 					vscode.window.showInformationMessage(`🚀 Triggered build: ${workflowName}`);
-					buildMonitor?.trackBuild(buildId, workflowName);
+					buildMonitor?.trackBuild(buildId, workflowName, buildRun?.attributes?.number);
 				}
 
 				unifiedProvider?.refresh();
@@ -110,6 +124,37 @@ export async function activate(context: vscode.ExtensionContext) {
 				updateStatusBar();
 			} catch (err: any) {
 				vscode.window.showErrorMessage(`Failed to cancel build: ${err?.message || String(err)}`);
+			}
+		}),
+
+		// Load Build Timeline
+		vscode.commands.registerCommand('xcodecloud.loadTimeline', async (buildRunNode?: BuildRunNode) => {
+			if (!client || !buildRunNode?.buildRunId) { return; }
+
+			const config = vscode.workspace.getConfiguration('xcodecloud');
+			const enableDetailed = config.get<boolean>('enableDetailedTimeline', true);
+
+			timelineProvider.setLoading(true);
+			await vscode.commands.executeCommand('setContext', 'xcodecloud.timelineLoaded', true);
+			await vscode.commands.executeCommand('xcodecloudBuildTimeline.focus');
+
+			const generator = new TimelineGenerator(client);
+			try {
+				const isDetailed = await generator.canFetchDetailedTasks(enableDetailed);
+				const raw = await generator.generateTimeline(
+					{ buildRunId: buildRunNode.buildRunId, workflowName: `Build #${buildRunNode.runNumber}` },
+					{ fetchDetailedTasks: isDetailed, onProgress: msg => timelineProvider.setLoading(true, msg) }
+				);
+				const loader = new TimelineLoader();
+				const result = loader.load(raw);
+
+				if (result.success && result.data) {
+					timelineProvider.setTimeline(result.data, !isDetailed);
+				} else {
+					timelineProvider.setError(result.errors[0]?.message ?? 'Failed to load timeline');
+				}
+			} catch (err: any) {
+				timelineProvider.setError(`Error: ${err?.message || String(err)}`);
 			}
 		}),
 

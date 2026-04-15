@@ -1,14 +1,69 @@
 import { request } from 'undici';
 import * as vscode from 'vscode';
 import { JwtProvider } from './auth';
+import { BASE_URL } from '../constants';
+import { logger } from '../logger';
 
-const BASE_URL = 'https://api.appstoreconnect.apple.com/v1';
+export class AscApiError extends Error {
+    constructor(
+        public readonly statusCode: number,
+        public readonly endpoint: string,
+        public readonly apiMessage: string
+    ) {
+        super(AscApiError.formatMessage(statusCode, apiMessage));
+        this.name = 'AscApiError';
+    }
+
+    private static formatMessage(code: number, msg: string): string {
+        if (code === 401) { return 'Authentication failed. Re-run "Configure App Store Connect Credentials".'; }
+        if (code === 403) { return 'Insufficient permissions for this operation.'; }
+        if (code === 404) { return 'Resource not found. It may have been deleted.'; }
+        if (code === 429) { return 'API rate limited. Slow down requests.'; }
+        if (code >= 500) { return 'Apple server error. Try again in a moment.'; }
+        return `API error ${code}: ${msg}`;
+    }
+}
 
 export class AppStoreConnectClient {
     private jwt: JwtProvider;
+    private cache = new Map<string, { data: any; expiresAt: number }>();
 
     constructor(secretStorage: vscode.SecretStorage) {
         this.jwt = new JwtProvider(secretStorage);
+    }
+
+    private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+        const delays = [1000, 2000, 4000];
+        let attempt = 0;
+        while (true) {
+            try {
+                return await fn();
+            } catch (error: any) {
+                if (attempt >= delays.length) { throw error; }
+                const isRetryable = error instanceof AscApiError ? error.statusCode >= 500 : true;
+                if (!isRetryable) { throw error; }
+
+                logger.warn(`API request failed, retrying in ${delays[attempt]}ms... (Attempt ${attempt + 1}/${delays.length})`);
+                await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+                attempt++;
+            }
+        }
+    }
+
+    private getCache(key: string): any | null {
+        const cached = this.cache.get(key);
+        if (cached && cached.expiresAt > Date.now()) {
+            return cached.data;
+        }
+        return null;
+    }
+
+    private setCache(key: string, data: any, ttlMs: number): void {
+        this.cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+    }
+
+    private invalidateCache(): void {
+        this.cache.clear();
     }
 
     async hasCredentials(): Promise<boolean> {
@@ -30,43 +85,54 @@ export class AppStoreConnectClient {
     }
 
     async get(path: string, query?: Record<string, string | number | boolean>): Promise<any> {
-        const url = new URL(`${BASE_URL}${path}`);
-        if (query) {
-            for (const [k, v] of Object.entries(query)) {
-                url.searchParams.set(k, String(v));
+        return this.withRetry(async () => {
+            const url = new URL(`${BASE_URL}${path}`);
+            if (query) {
+                for (const [k, v] of Object.entries(query)) {
+                    url.searchParams.set(k, String(v));
+                }
             }
-        }
-        const headers = await this.getHeaders();
-        const res = await request(url.toString(), { method: 'GET', headers });
-        if (res.statusCode >= 400) {
-            const body = await res.body.text();
-            throw new Error(`GET ${url} failed (${res.statusCode}): ${body}`);
-        }
-        return await res.body.json();
+            const headers = await this.getHeaders();
+            const res = await request(url.toString(), { method: 'GET', headers });
+            if (res.statusCode >= 400) {
+                const body = await res.body.text();
+                throw new AscApiError(res.statusCode, path, body);
+            }
+            return await res.body.json();
+        });
     }
 
     async post(path: string, body: any): Promise<any> {
-        const url = `${BASE_URL}${path}`;
-        const headers = await this.getHeaders();
-        const res = await request(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(body)
+        this.invalidateCache();
+        return this.withRetry(async () => {
+            const url = `${BASE_URL}${path}`;
+            const headers = await this.getHeaders();
+            const res = await request(url, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(body)
+            });
+            if (res.statusCode >= 400) {
+                const text = await res.body.text();
+                throw new AscApiError(res.statusCode, path, text);
+            }
+            return await res.body.json();
         });
-        if (res.statusCode >= 400) {
-            const text = await res.body.text();
-            throw new Error(`POST ${url} failed (${res.statusCode}): ${text}`);
-        }
-        return await res.body.json();
     }
 
     // Xcode Cloud: list all products (apps with Xcode Cloud enabled)
     async listProducts(options?: { limit?: number }) {
+        const cacheKey = `listProducts_${options?.limit || 'default'}`;
+        const cached = this.getCache(cacheKey);
+        if (cached) { return cached; }
+
         const query: Record<string, string> = {};
         if (options?.limit) {
             query['limit'] = String(options.limit);
         }
-        return this.get('/ciProducts', query);
+        const data = await this.get('/ciProducts', query);
+        this.setCache(cacheKey, data, 60_000); // 60s TTL
+        return data;
     }
 
     // Xcode Cloud: list workflows for a product (required - /ciWorkflows doesn't allow collection listing)
@@ -173,7 +239,13 @@ export class AppStoreConnectClient {
 
     // Helper: fetch workflow details including linked repository
     async getWorkflow(id: string) {
-        return this.get(`/ciWorkflows/${id}`, { 'include': 'repository' });
+        const cacheKey = `getWorkflow_${id}`;
+        const cached = this.getCache(cacheKey);
+        if (cached) { return cached; }
+
+        const data = await this.get(`/ciWorkflows/${id}`, { 'include': 'repository' });
+        this.setCache(cacheKey, data, 30_000); // 30s TTL
+        return data;
     }
 
     // Xcode Cloud: trigger a build run
@@ -231,6 +303,16 @@ export class AppStoreConnectClient {
         return this.get(`/ciArtifacts/${artifactId}`);
     }
 
+    // Xcode Cloud: download artifact content (logs) from a download URL
+    async downloadArtifactContent(downloadUrl: string): Promise<string> {
+        const res = await request(downloadUrl, { method: 'GET' });
+        if (res.statusCode >= 400) {
+            const body = await res.body.text();
+            throw new Error(`Failed to download artifact (${res.statusCode}): ${body}`);
+        }
+        return await res.body.text();
+    }
+
     // Get a single build run
     async getBuildRun(buildRunId: string) {
         return this.get(`/ciBuildRuns/${buildRunId}`);
@@ -259,28 +341,34 @@ export class AppStoreConnectClient {
     // ==========================
 
     async patch(path: string, body: any): Promise<any> {
-        const url = `${BASE_URL}${path}`;
-        const headers = await this.getHeaders();
-        const res = await request(url, {
-            method: 'PATCH',
-            headers,
-            body: JSON.stringify(body)
+        this.invalidateCache();
+        return this.withRetry(async () => {
+            const url = `${BASE_URL}${path}`;
+            const headers = await this.getHeaders();
+            const res = await request(url, {
+                method: 'PATCH',
+                headers,
+                body: JSON.stringify(body)
+            });
+            if (res.statusCode >= 400) {
+                const text = await res.body.text();
+                throw new AscApiError(res.statusCode, path, text);
+            }
+            return await res.body.json();
         });
-        if (res.statusCode >= 400) {
-            const text = await res.body.text();
-            throw new Error(`PATCH ${url} failed (${res.statusCode}): ${text}`);
-        }
-        return await res.body.json();
     }
 
     async delete(path: string): Promise<void> {
-        const url = `${BASE_URL}${path}`;
-        const headers = await this.getHeaders();
-        const res = await request(url, { method: 'DELETE', headers });
-        if (res.statusCode >= 400) {
-            const text = await res.body.text();
-            throw new Error(`DELETE ${url} failed (${res.statusCode}): ${text}`);
-        }
+        this.invalidateCache();
+        return this.withRetry(async () => {
+            const url = `${BASE_URL}${path}`;
+            const headers = await this.getHeaders();
+            const res = await request(url, { method: 'DELETE', headers });
+            if (res.statusCode >= 400) {
+                const text = await res.body.text();
+                throw new AscApiError(res.statusCode, path, text);
+            }
+        });
     }
 
     // ==========================
@@ -397,18 +485,30 @@ export class AppStoreConnectClient {
      * List available Xcode versions for workflows
      */
     async listXcodeVersions(options?: { limit?: number }) {
+        const cacheKey = `listXcodeVersions_${options?.limit || 'default'}`;
+        const cached = this.getCache(cacheKey);
+        if (cached) { return cached; }
+
         const query: Record<string, string> = {};
         if (options?.limit) { query['limit'] = String(options.limit); }
-        return this.get('/ciXcodeVersions', query);
+        const data = await this.get('/ciXcodeVersions', query);
+        this.setCache(cacheKey, data, 300_000); // 5 min TTL
+        return data;
     }
 
     /**
      * List available macOS versions for workflows
      */
     async listMacOsVersions(xcodeVersionId: string, options?: { limit?: number }) {
+        const cacheKey = `listMacOsVersions_${xcodeVersionId}_${options?.limit || 'default'}`;
+        const cached = this.getCache(cacheKey);
+        if (cached) { return cached; }
+
         const query: Record<string, string> = {};
         if (options?.limit) { query['limit'] = String(options.limit); }
-        return this.get(`/ciXcodeVersions/${xcodeVersionId}/macOsVersions`, query);
+        const data = await this.get(`/ciXcodeVersions/${xcodeVersionId}/macOsVersions`, query);
+        this.setCache(cacheKey, data, 300_000); // 5 min TTL
+        return data;
     }
 
     /**

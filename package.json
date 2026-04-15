@@ -30,6 +30,26 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Xcode Cloud Control",
+      "properties": {
+        "xcodecloud.pollIntervalSeconds": {
+          "type": "number",
+          "default": 30,
+          "description": "How often (in seconds) to poll for build status updates."
+        },
+        "xcodecloud.enableDetailedTimeline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Parse XCResult bundles for detailed phase/task timelines (macOS + Xcode required)."
+        },
+        "xcodecloud.autoShowBuildLogs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the build log output channel when a build is triggered."
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -50,6 +70,12 @@
           "id": "xcodecloudWorkflowDetails",
           "name": "Workflow Details",
           "icon": "$(info)"
+        },
+        {
+          "id": "xcodecloudBuildTimeline",
+          "name": "Build Timeline",
+          "icon": "$(timeline-view-icon)",
+          "when": "xcodecloud.timelineLoaded"
         }
       ]
     },
@@ -123,6 +149,11 @@
         "command": "xcodecloud.deleteWorkflow",
         "title": "Xcode Cloud: Delete Workflow",
         "icon": "$(trash)"
+      },
+      {
+        "command": "xcodecloud.loadTimeline",
+        "title": "Xcode Cloud: Load Build Timeline",
+        "icon": "$(timeline-view-icon)"
       }
     ],
     "menus": {
@@ -172,6 +203,16 @@
         {
           "command": "xcodecloud.cancelBuild",
           "when": "view == xcodecloudWorkflowRuns && viewItem == buildRunActive",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "xcodecloud.loadTimeline",
+          "when": "view == xcodecloudWorkflowRuns && viewItem =~ /^buildRunComplete/",
+          "group": "inline"
+        },
+        {
+          "command": "xcodecloud.loadTimeline",
+          "when": "view == xcodecloudWorkflowRuns && viewItem =~ /^buildRunComplete/",
           "group": "1_actions@1"
         },
         {
