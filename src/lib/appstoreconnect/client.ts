@@ -105,7 +105,10 @@ export class AppStoreConnectClient {
                 }
             }
             const headers = await this.getHeaders();
+            logger.request('GET', path);
+            const t0 = Date.now();
             const res = await request(url.toString(), { method: 'GET', headers });
+            logger.response('GET', path, res.statusCode, Date.now() - t0);
             if (res.statusCode >= 400) {
                 const body = await res.body.text();
                 throw new AscApiError(res.statusCode, path, body);
@@ -119,11 +122,14 @@ export class AppStoreConnectClient {
         return this.withRetry(async () => {
             const url = `${BASE_URL}${path}`;
             const headers = await this.getHeaders();
+            logger.request('POST', path);
+            const t0 = Date.now();
             const res = await request(url, {
                 method: 'POST',
                 headers,
                 body: JSON.stringify(body)
             });
+            logger.response('POST', path, res.statusCode, Date.now() - t0);
             if (res.statusCode >= 400) {
                 const text = await res.body.text();
                 throw new AscApiError(res.statusCode, path, text);
@@ -357,11 +363,14 @@ export class AppStoreConnectClient {
         return this.withRetry(async () => {
             const url = `${BASE_URL}${path}`;
             const headers = await this.getHeaders();
+            logger.request('PATCH', path);
+            const t0 = Date.now();
             const res = await request(url, {
                 method: 'PATCH',
                 headers,
                 body: JSON.stringify(body)
             });
+            logger.response('PATCH', path, res.statusCode, Date.now() - t0);
             if (res.statusCode >= 400) {
                 const text = await res.body.text();
                 throw new AscApiError(res.statusCode, path, text);
@@ -375,7 +384,10 @@ export class AppStoreConnectClient {
         return this.withRetry(async () => {
             const url = `${BASE_URL}${path}`;
             const headers = await this.getHeaders();
+            logger.request('DELETE', path);
+            const t0 = Date.now();
             const res = await request(url, { method: 'DELETE', headers });
+            logger.response('DELETE', path, res.statusCode, Date.now() - t0);
             if (res.statusCode >= 400) {
                 const text = await res.body.text();
                 throw new AscApiError(res.statusCode, path, text);
