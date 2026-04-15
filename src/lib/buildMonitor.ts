@@ -165,9 +165,13 @@ export class BuildMonitor {
                     tracked.knownActions.set(actionId, { name, status, type });
                     if (status === 'RUNNING') {
                         this.buildLogStream.appendActionStart(buildId, name, type);
+                        // Refresh tree so the spinning icon appears immediately
+                        this.onBuildUpdate?.();
                     } else if (status === 'COMPLETE') {
                         this.buildLogStream.appendActionComplete(buildId, name, completionStatus);
                         await this.fetchAndAppendActionLogs(buildId, actionId);
+                        // Refresh tree so the completed action status/icon updates immediately
+                        this.onBuildUpdate?.();
                     }
                 } else {
                     // updated action status
@@ -175,9 +179,13 @@ export class BuildMonitor {
                         known.status = status;
                         if (status === 'RUNNING') {
                             this.buildLogStream.appendActionStart(buildId, name, type);
+                            // Refresh tree so the spinning icon appears immediately
+                            this.onBuildUpdate?.();
                         } else if (status === 'COMPLETE') {
                             this.buildLogStream.appendActionComplete(buildId, name, completionStatus);
                             await this.fetchAndAppendActionLogs(buildId, actionId);
+                            // Refresh tree so the completed action status/icon updates immediately
+                            this.onBuildUpdate?.();
                         }
                     }
                 }
