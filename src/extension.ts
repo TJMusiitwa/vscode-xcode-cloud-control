@@ -98,6 +98,13 @@ export async function activate(context: vscode.ExtensionContext) {
 					buildMonitor?.trackBuild(buildId, workflowName, buildRun?.attributes?.number);
 				}
 
+				// Expand the workflow in the tree so the new build run is immediately visible.
+				// We expand before refresh so that when the tree data reloads, the node is
+				// already open and the new build run appears at the top without a manual click.
+				if (workflowNode) {
+					await workflowsTreeView.reveal(workflowNode, { expand: 1, select: true, focus: false });
+				}
+
 				unifiedProvider?.refresh();
 				updateStatusBar();
 			} catch (err: any) {
