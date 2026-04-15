@@ -1,7 +1,7 @@
 import { importPKCS8, SignJWT } from 'jose';
 import * as vscode from 'vscode';
-import { CredentialKeys } from '../credentials';
 import { JWT_EXPIRY_SECONDS } from '../constants';
+import { CredentialKeys } from '../credentials';
 
 const AUDIENCE = 'appstoreconnect-v1';
 const ALG = 'ES256';

@@ -1,7 +1,6 @@
 import * as assert from 'assert';
-import { BuildMonitor } from '../lib/buildMonitor';
 import { AppStoreConnectClient } from '../lib/appstoreconnect/client';
-import * as vscode from 'vscode';
+import { BuildMonitor } from '../lib/buildMonitor';
 
 class MockClient extends AppStoreConnectClient {
     constructor() {

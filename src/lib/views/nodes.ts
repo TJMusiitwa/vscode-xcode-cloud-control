@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { formatStatus, getStatusIcon, formatDuration } from '../shared/formatting';
+import { formatDuration, formatStatus, getStatusIcon } from '../shared/formatting';
 
 // =======================
 // Node Types

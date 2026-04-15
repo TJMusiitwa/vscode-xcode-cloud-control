@@ -1,6 +1,6 @@
 import * as cp from 'child_process';
-import { promisify } from 'util';
 import * as os from 'os';
+import { promisify } from 'util';
 
 const exec = promisify(cp.exec);
 

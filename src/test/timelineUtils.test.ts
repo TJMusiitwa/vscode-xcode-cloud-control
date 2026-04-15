@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { formatDuration, formatTimestamp, computeStatistics, flattenTimeline, findNodeById } from '../lib/timeline/utils';
+import { computeStatistics, findNodeById, flattenTimeline, formatDuration, formatTimestamp } from '../lib/timeline/utils';
 
 suite('Timeline Utils Tests', () => {
     test('formatDuration formats ms to seconds correctly', () => {
@@ -18,14 +18,18 @@ suite('Timeline Utils Tests', () => {
 
     test('computeStatistics calculates totals correctly', () => {
         const timeline = [
-            { type: 'action', status: 'SUCCEEDED', children: [
-                { type: 'task', status: 'SUCCEEDED' },
-                { type: 'task', status: 'FAILED' }
-            ]},
-            { type: 'action', status: 'FAILED', children: [
-                { type: 'task', status: 'SKIPPED' },
-                { type: 'task', status: 'UNKNOWN' }
-            ]}
+            {
+                type: 'action', status: 'SUCCEEDED', children: [
+                    { type: 'task', status: 'SUCCEEDED' },
+                    { type: 'task', status: 'FAILED' }
+                ]
+            },
+            {
+                type: 'action', status: 'FAILED', children: [
+                    { type: 'task', status: 'SKIPPED' },
+                    { type: 'task', status: 'UNKNOWN' }
+                ]
+            }
         ];
         const stats = computeStatistics(timeline);
         assert.deepStrictEqual(stats, { total: 4, passed: 1, failed: 1, skipped: 1 });

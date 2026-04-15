@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { AppStoreConnectClient } from '../appstoreconnect/client';
-import { TreeNode, WorkflowNode, BuildRunNode, BuildActionNode, TestResultNode, IssueNode } from './nodes';
-export { TreeNode, WorkflowNode, BuildRunNode, BuildActionNode, TestResultNode, IssueNode } from './nodes';
+import { BuildActionNode, BuildRunNode, IssueNode, TestResultNode, TreeNode, WorkflowNode } from './nodes';
+export { BuildActionNode, BuildRunNode, IssueNode, TestResultNode, TreeNode, WorkflowNode } from './nodes';
 
 export class UnifiedWorkflowTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
     private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined | void>();

@@ -2,7 +2,7 @@ import { AppStoreConnectClient } from '../appstoreconnect/client';
 import { isXCResultToolAvailable } from './xcresult-parser';
 
 export class TimelineGenerator {
-    constructor(private client: AppStoreConnectClient) {}
+    constructor(private client: AppStoreConnectClient) { }
 
     async canFetchDetailedTasks(enableDetailedTimeline: boolean): Promise<boolean> {
         if (!enableDetailedTimeline) {

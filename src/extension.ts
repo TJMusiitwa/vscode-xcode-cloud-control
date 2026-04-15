@@ -2,11 +2,10 @@ import * as vscode from 'vscode';
 import { AppStoreConnectClient } from './lib/appstoreconnect/client';
 import { BuildMonitor } from './lib/buildMonitor';
 import { ensureCredentials } from './lib/credentials';
+import { TimelineGenerator, TimelineLoader, TimelineTreeDataProvider } from './lib/timeline';
 import { BuildRunNode, UnifiedWorkflowTreeDataProvider, WorkflowNode } from './lib/views/UnifiedWorkflowTree';
 import { WorkflowDetailsTreeDataProvider } from './lib/views/WorkflowDetailsTree';
 import { WorkflowEditorPanel } from './lib/views/WorkflowEditorPanel';
-import { TimelineTreeDataProvider, TimelineGenerator, TimelineLoader } from './lib/timeline';
-import { logger } from './lib/logger';
 
 let client: AppStoreConnectClient | null = null;
 let unifiedProvider: UnifiedWorkflowTreeDataProvider | null = null;
