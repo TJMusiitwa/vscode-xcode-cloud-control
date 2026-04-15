@@ -268,6 +268,17 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 		}),
 
+		// React to settings changes at runtime
+		vscode.workspace.onDidChangeConfiguration(e => {
+			if (e.affectsConfiguration('xcodecloud.pollIntervalSeconds')) {
+				buildMonitor?.restart();
+			}
+			if (e.affectsConfiguration('xcodecloud.enableDetailedTimeline')) {
+				// Reset the timeline so the next load respects the new setting
+				timelineProvider.setTimeline([]);
+			}
+		}),
+
 		// Disposable for build monitor cleanup
 		{ dispose: () => buildMonitor?.dispose() }
 	);

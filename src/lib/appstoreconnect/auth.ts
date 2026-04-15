@@ -1,6 +1,7 @@
 import { importPKCS8, SignJWT } from 'jose';
 import * as vscode from 'vscode';
 import { CredentialKeys } from '../credentials';
+import { JWT_EXPIRY_SECONDS } from '../constants';
 
 const AUDIENCE = 'appstoreconnect-v1';
 const ALG = 'ES256';
@@ -28,7 +29,7 @@ export class JwtProvider {
 
         const ecPrivateKey = await importPKCS8(privateKey, ALG);
         const iat = Math.floor(Date.now() / 1000);
-        const exp = iat + (18 * 60); // 18 minutes; must be <= 20 minutes
+        const exp = iat + JWT_EXPIRY_SECONDS; // must be <= 20 minutes per Apple docs
 
         const token = await new SignJWT({})
             .setProtectedHeader({ alg: ALG, kid: keyId, typ: 'JWT' })

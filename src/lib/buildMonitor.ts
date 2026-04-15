@@ -60,6 +60,16 @@ export class BuildMonitor {
     }
 
     /**
+     * Restart monitoring — re-reads configuration and resets the polling interval.
+     * Call this when the user changes extension settings at runtime.
+     */
+    restart(): void {
+        logger.log('BuildMonitor: restarting with updated configuration');
+        this.stop();
+        this.start();
+    }
+
+    /**
      * Stop monitoring builds
      */
     stop(): void {

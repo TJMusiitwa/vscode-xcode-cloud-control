@@ -16,7 +16,19 @@ export class AscApiError extends Error {
 
     private static formatMessage(code: number, msg: string): string {
         if (code === 401) { return 'Authentication failed. Re-run "Configure App Store Connect Credentials".'; }
-        if (code === 403) { return 'Insufficient permissions for this operation.'; }
+        if (code === 403) {
+            // Apple returns 403 for several distinct reasons — surface the raw body so the
+            // developer can diagnose: wrong key scope, revoked key, or malformed JWT.
+            let detail = msg;
+            try {
+                const parsed = JSON.parse(msg);
+                const errors = parsed?.errors;
+                if (Array.isArray(errors) && errors.length > 0) {
+                    detail = errors.map((e: any) => e?.detail || e?.title || JSON.stringify(e)).join('; ');
+                }
+            } catch { /* msg is not JSON, use raw */ }
+            return `Forbidden (403): ${detail}\n\nPossible causes:\n• API key lacks "Xcode Cloud" permission in App Store Connect\n• API key has been revoked\n• Re-run "Configure App Store Connect Credentials" to check your key.`;
+        }
         if (code === 404) { return 'Resource not found. It may have been deleted.'; }
         if (code === 429) { return 'API rate limited. Slow down requests.'; }
         if (code >= 500) { return 'Apple server error. Try again in a moment.'; }
