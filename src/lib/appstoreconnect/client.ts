@@ -1,8 +1,8 @@
 import { request } from 'undici';
 import * as vscode from 'vscode';
-import { JwtProvider } from './auth';
 import { BASE_URL } from '../constants';
 import { logger } from '../logger';
+import { JwtProvider } from './auth';
 
 export class AscApiError extends Error {
     constructor(
@@ -39,9 +39,25 @@ export class AscApiError extends Error {
 export class AppStoreConnectClient {
     private jwt: JwtProvider;
     private cache = new Map<string, { data: any; expiresAt: number }>();
+    private requestQueue = Promise.resolve();
 
     constructor(secretStorage: vscode.SecretStorage) {
         this.jwt = new JwtProvider(secretStorage);
+    }
+
+    /**
+     * Enqueue a function to execute serially.
+     * Ensures only one HTTP request is in-flight at a time, preventing rate limiting.
+     */
+    private async enqueue<T>(fn: () => Promise<T>): Promise<T> {
+        return new Promise((resolve, reject) => {
+            this.requestQueue = this.requestQueue
+                .then(() => fn(), err => {
+                    // If previous request failed, still proceed with next one
+                    return fn();
+                })
+                .then(resolve, reject);
+        });
     }
 
     private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
@@ -78,6 +94,44 @@ export class AppStoreConnectClient {
         this.cache.clear();
     }
 
+    /**
+     * Fetch all items from a paginated API endpoint.
+     * Automatically follows cursor pagination until all results are fetched.
+     * @param path API path to fetch from
+     * @param limit Maximum total items to fetch (null = fetch all)
+     * @returns Array of all items across all pages
+     */
+    private async fetchAllPages(path: string, limit?: number): Promise<any[]> {
+        const items: any[] = [];
+        let nextCursor: string | null = null;
+        let totalFetched = 0;
+
+        while (true) {
+            const query: Record<string, string | number> = { limit: 50 }; // Page size
+            if (nextCursor) {
+                query.next = nextCursor;
+            }
+
+            const response = await this.get(path, query as Record<string, string>);
+            const pageItems = response?.data || [];
+            items.push(...pageItems);
+            totalFetched += pageItems.length;
+
+            // Check if we've reached the limit or if there are no more pages
+            if (limit && totalFetched >= limit) {
+                return items.slice(0, limit);
+            }
+
+            // Get cursor for next page
+            nextCursor = response?.meta?.paging?.next || null;
+            if (!nextCursor || pageItems.length === 0) {
+                break; // No more pages
+            }
+        }
+
+        return items;
+    }
+
     async hasCredentials(): Promise<boolean> {
         try {
             await this.jwt.getToken();
@@ -97,45 +151,49 @@ export class AppStoreConnectClient {
     }
 
     async get(path: string, query?: Record<string, string | number | boolean>): Promise<any> {
-        return this.withRetry(async () => {
-            const url = new URL(`${BASE_URL}${path}`);
-            if (query) {
-                for (const [k, v] of Object.entries(query)) {
-                    url.searchParams.set(k, String(v));
+        return this.enqueue(async () =>
+            this.withRetry(async () => {
+                const url = new URL(`${BASE_URL}${path}`);
+                if (query) {
+                    for (const [k, v] of Object.entries(query)) {
+                        url.searchParams.set(k, String(v));
+                    }
                 }
-            }
-            const headers = await this.getHeaders();
-            logger.request('GET', path);
-            const t0 = Date.now();
-            const res = await request(url.toString(), { method: 'GET', headers });
-            logger.response('GET', path, res.statusCode, Date.now() - t0);
-            if (res.statusCode >= 400) {
-                const body = await res.body.text();
-                throw new AscApiError(res.statusCode, path, body);
-            }
-            return await res.body.json();
-        });
+                const headers = await this.getHeaders();
+                logger.request('GET', path);
+                const t0 = Date.now();
+                const res = await request(url.toString(), { method: 'GET', headers });
+                logger.response('GET', path, res.statusCode, Date.now() - t0);
+                if (res.statusCode >= 400) {
+                    const body = await res.body.text();
+                    throw new AscApiError(res.statusCode, path, body);
+                }
+                return await res.body.json();
+            })
+        );
     }
 
     async post(path: string, body: any): Promise<any> {
         this.invalidateCache();
-        return this.withRetry(async () => {
-            const url = `${BASE_URL}${path}`;
-            const headers = await this.getHeaders();
-            logger.request('POST', path);
-            const t0 = Date.now();
-            const res = await request(url, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(body)
-            });
-            logger.response('POST', path, res.statusCode, Date.now() - t0);
-            if (res.statusCode >= 400) {
-                const text = await res.body.text();
-                throw new AscApiError(res.statusCode, path, text);
-            }
-            return await res.body.json();
-        });
+        return this.enqueue(async () =>
+            this.withRetry(async () => {
+                const url = `${BASE_URL}${path}`;
+                const headers = await this.getHeaders();
+                logger.request('POST', path);
+                const t0 = Date.now();
+                const res = await request(url, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(body)
+                });
+                logger.response('POST', path, res.statusCode, Date.now() - t0);
+                if (res.statusCode >= 400) {
+                    const text = await res.body.text();
+                    throw new AscApiError(res.statusCode, path, text);
+                }
+                return await res.body.json();
+            })
+        );
     }
 
     // Xcode Cloud: list all products (apps with Xcode Cloud enabled)
@@ -172,12 +230,11 @@ export class AppStoreConnectClient {
             return { data: [] };
         }
 
-        // Fetch workflows from all products in parallel
+        // Fetch workflows from all products in parallel, with pagination support
         const workflowPromises = products.map((product: any) =>
-            this.listWorkflowsByProduct(product.id, { limit: Math.ceil(limit / products.length) + 5 })
-                .then(response => {
+            this.fetchAllPages(`/ciProducts/${product.id}/workflows`, Math.ceil(limit / products.length) + 5)
+                .then(workflows => {
                     // Attach product info to each workflow for context
-                    const workflows = response?.data || [];
                     return workflows.map((wf: any) => ({
                         ...wf,
                         _productId: product.id,
@@ -196,13 +253,11 @@ export class AppStoreConnectClient {
     }
 
     // Xcode Cloud: list build runs for a workflow (required - cannot list all builds directly)
+    // Supports pagination automatically for accounts with many builds
     async listBuildRuns(options: { workflowId: string; limit?: number }) {
-        const query: Record<string, string> = {};
-        if (options.limit) {
-            query['limit'] = String(options.limit);
-        }
-        // Apple's API requires fetching builds via the workflow relationship
-        return this.get(`/ciWorkflows/${options.workflowId}/buildRuns`, query);
+        const limit = options.limit || 25;
+        const items = await this.fetchAllPages(`/ciWorkflows/${options.workflowId}/buildRuns`, limit);
+        return { data: items };
     }
 
     // Xcode Cloud: list build runs for a product (alternative to per-workflow)
@@ -224,17 +279,17 @@ export class AppStoreConnectClient {
             return { data: [] };
         }
 
-        // Fetch builds from all products in parallel
+        // Fetch builds from all products in parallel with pagination support
         const buildPromises = products.map((product: any) =>
-            this.listBuildRunsByProduct({ productId: product.id, limit: Math.ceil(limit / products.length) + 5 })
-                .catch(() => ({ data: [] })) // Ignore errors for individual products
+            this.fetchAllPages(`/ciProducts/${product.id}/buildRuns`, Math.ceil(limit / products.length) + 5)
+                .catch(() => []) // Ignore errors for individual products
         );
 
         const results = await Promise.all(buildPromises);
 
         // Combine and sort by startedDate (most recent first)
         const allBuilds = results
-            .flatMap(r => r?.data || [])
+            .flat()
             .sort((a: any, b: any) => {
                 const dateA = a?.attributes?.startedDate || a?.attributes?.createdDate || '';
                 const dateB = b?.attributes?.startedDate || b?.attributes?.createdDate || '';
@@ -337,21 +392,19 @@ export class AppStoreConnectClient {
     }
 
     // Xcode Cloud: get test results for a test action
+    // Automatically paginated for actions with many tests
     async getTestResults(actionId: string, options?: { limit?: number }) {
-        const query: Record<string, string> = {};
-        if (options?.limit) {
-            query['limit'] = String(options.limit);
-        }
-        return this.get(`/ciBuildActions/${actionId}/testResults`, query);
+        const limit = options?.limit || 100;
+        const items = await this.fetchAllPages(`/ciBuildActions/${actionId}/testResults`, limit);
+        return { data: items };
     }
 
     // Xcode Cloud: get issues for a build action
+    // Automatically paginated for actions with many issues
     async getIssues(actionId: string, options?: { limit?: number }) {
-        const query: Record<string, string> = {};
-        if (options?.limit) {
-            query['limit'] = String(options.limit);
-        }
-        return this.get(`/ciBuildActions/${actionId}/issues`, query);
+        const limit = options?.limit || 100;
+        const items = await this.fetchAllPages(`/ciBuildActions/${actionId}/issues`, limit);
+        return { data: items };
     }
 
     // ==========================
@@ -360,39 +413,43 @@ export class AppStoreConnectClient {
 
     async patch(path: string, body: any): Promise<any> {
         this.invalidateCache();
-        return this.withRetry(async () => {
-            const url = `${BASE_URL}${path}`;
-            const headers = await this.getHeaders();
-            logger.request('PATCH', path);
-            const t0 = Date.now();
-            const res = await request(url, {
-                method: 'PATCH',
-                headers,
-                body: JSON.stringify(body)
-            });
-            logger.response('PATCH', path, res.statusCode, Date.now() - t0);
-            if (res.statusCode >= 400) {
-                const text = await res.body.text();
-                throw new AscApiError(res.statusCode, path, text);
-            }
-            return await res.body.json();
-        });
+        return this.enqueue(async () =>
+            this.withRetry(async () => {
+                const url = `${BASE_URL}${path}`;
+                const headers = await this.getHeaders();
+                logger.request('PATCH', path);
+                const t0 = Date.now();
+                const res = await request(url, {
+                    method: 'PATCH',
+                    headers,
+                    body: JSON.stringify(body)
+                });
+                logger.response('PATCH', path, res.statusCode, Date.now() - t0);
+                if (res.statusCode >= 400) {
+                    const text = await res.body.text();
+                    throw new AscApiError(res.statusCode, path, text);
+                }
+                return await res.body.json();
+            })
+        );
     }
 
     async delete(path: string): Promise<void> {
         this.invalidateCache();
-        return this.withRetry(async () => {
-            const url = `${BASE_URL}${path}`;
-            const headers = await this.getHeaders();
-            logger.request('DELETE', path);
-            const t0 = Date.now();
-            const res = await request(url, { method: 'DELETE', headers });
-            logger.response('DELETE', path, res.statusCode, Date.now() - t0);
-            if (res.statusCode >= 400) {
-                const text = await res.body.text();
-                throw new AscApiError(res.statusCode, path, text);
-            }
-        });
+        return this.enqueue(async () =>
+            this.withRetry(async () => {
+                const url = `${BASE_URL}${path}`;
+                const headers = await this.getHeaders();
+                logger.request('DELETE', path);
+                const t0 = Date.now();
+                const res = await request(url, { method: 'DELETE', headers });
+                logger.response('DELETE', path, res.statusCode, Date.now() - t0);
+                if (res.statusCode >= 400) {
+                    const text = await res.body.text();
+                    throw new AscApiError(res.statusCode, path, text);
+                }
+            })
+        );
     }
 
     // ==========================
