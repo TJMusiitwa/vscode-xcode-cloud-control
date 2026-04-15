@@ -1,11 +1,16 @@
 import * as vscode from 'vscode';
 import { AppStoreConnectClient } from './appstoreconnect/client';
+import { BuildLogStream } from './buildLogStream';
+import { POLL_INTERVAL_MS_ACTIVE, POLL_INTERVAL_MS_IDLE } from './constants';
+import { logger } from './logger';
 
 interface TrackedBuild {
     id: string;
     workflowName: string;
+    runNumber?: number;
     status: string;
     state: string;
+    knownActions: Map<string, { name: string; status: string; type: string }>;
 }
 
 /**
@@ -14,25 +19,54 @@ interface TrackedBuild {
 export class BuildMonitor {
     private trackedBuilds: Map<string, TrackedBuild> = new Map();
     private pollingInterval: NodeJS.Timeout | null = null;
-    private readonly POLL_INTERVAL_MS = 30000; // 30 seconds
+    private buildLogStream = new BuildLogStream();
+    private currentPollInterval = POLL_INTERVAL_MS_IDLE;
 
     constructor(
         private client: AppStoreConnectClient,
         private onBuildUpdate?: () => void
     ) { }
 
+    private getConfiguredPollInterval(): number {
+        const config = vscode.workspace.getConfiguration('xcodecloud');
+        const seconds = config.get<number>('pollIntervalSeconds') || 30;
+        return seconds * 1000;
+    }
+
+    private getAdaptiveInterval(): number {
+        if (this.trackedBuilds.size > 0) {
+            return POLL_INTERVAL_MS_ACTIVE;
+        }
+        return this.getConfiguredPollInterval();
+    }
+
+    private updatePollingInterval(): void {
+        const desiredInterval = this.getAdaptiveInterval();
+        if (this.currentPollInterval !== desiredInterval || !this.pollingInterval) {
+            this.currentPollInterval = desiredInterval;
+            this.stop();
+            this.pollingInterval = setInterval(() => {
+                this.pollBuilds();
+            }, this.currentPollInterval);
+        }
+    }
+
     /**
      * Start monitoring builds
      */
     start(): void {
-        if (this.pollingInterval) { return; }
-
-        this.pollingInterval = setInterval(() => {
-            this.pollBuilds();
-        }, this.POLL_INTERVAL_MS);
-
-        // Initial poll
+        this.updatePollingInterval();
         this.pollBuilds();
+    }
+
+    /**
+     * Restart monitoring — re-reads configuration and resets the polling interval.
+     * Call this when the user changes extension settings at runtime.
+     */
+    restart(): void {
+        logger.log('BuildMonitor: restarting with updated configuration');
+        this.stop();
+        this.start();
     }
 
     /**
@@ -48,13 +82,26 @@ export class BuildMonitor {
     /**
      * Track a newly triggered build for notifications
      */
-    trackBuild(buildId: string, workflowName: string): void {
+    trackBuild(buildId: string, workflowName: string, runNumber?: number): void {
         this.trackedBuilds.set(buildId, {
             id: buildId,
             workflowName,
+            runNumber,
             status: 'PENDING',
-            state: ''
+            state: '',
+            knownActions: new Map()
         });
+
+        if (runNumber) {
+            const config = vscode.workspace.getConfiguration('xcodecloud');
+            if (config.get<boolean>('autoShowBuildLogs', true)) {
+                this.buildLogStream.openForBuild(buildId, runNumber, workflowName).show(true);
+            } else {
+                this.buildLogStream.openForBuild(buildId, runNumber, workflowName);
+            }
+        }
+
+        this.updatePollingInterval();
     }
 
     private async pollBuilds(): Promise<void> {
@@ -74,9 +121,13 @@ export class BuildMonitor {
                 const state = build?.attributes?.completionStatus || '';
                 const workflowName = tracked.workflowName || `Build ${buildId}`;
 
+                // Poll actions for log streaming
+                await this.pollActionsForLogs(buildId, tracked);
+
                 // Check if build has completed
                 if (progress.toUpperCase() === 'COMPLETE' && tracked.status !== 'COMPLETE') {
                     this.notifyBuildComplete(buildId, workflowName, state);
+                    this.buildLogStream.closeBuild(buildId);
                     this.trackedBuilds.delete(buildId);
                     this.onBuildUpdate?.();
                 } else if (progress.toUpperCase() !== tracked.status) {
@@ -86,8 +137,92 @@ export class BuildMonitor {
                 }
             } catch (err) {
                 // Build may no longer exist or API error - remove from tracking
-                console.error(`Failed to poll build ${buildId}:`, err);
+                logger.error(`Failed to poll build ${buildId}: ${err}`);
             }
+        }
+
+        // Polling loop might change active vs idle status
+        this.updatePollingInterval();
+    }
+
+    private async pollActionsForLogs(buildId: string, tracked: TrackedBuild): Promise<void> {
+        try {
+            const actionsResp = await this.client.getBuildActions(buildId);
+            const actions = actionsResp?.data || [];
+
+            for (const action of actions) {
+                const attrs = action?.attributes || {};
+                const actionId = action.id;
+                const name = attrs.name || 'Unknown Action';
+                const type = attrs.actionType || 'UNKNOWN';
+                const status = attrs.executionProgress?.toUpperCase() || 'UNKNOWN';
+                const completionStatus = attrs.completionStatus?.toUpperCase() || '';
+
+                const known = tracked.knownActions.get(actionId);
+
+                if (!known) {
+                    // newly discovered action
+                    tracked.knownActions.set(actionId, { name, status, type });
+                    if (status === 'RUNNING') {
+                        this.buildLogStream.appendActionStart(buildId, name, type);
+                        // Refresh tree so the spinning icon appears immediately
+                        this.onBuildUpdate?.();
+                    } else if (status === 'COMPLETE') {
+                        this.buildLogStream.appendActionComplete(buildId, name, completionStatus);
+                        await this.fetchAndAppendActionLogs(buildId, actionId);
+                        // Refresh tree so the completed action status/icon updates immediately
+                        this.onBuildUpdate?.();
+                    }
+                } else {
+                    // updated action status
+                    if (known.status !== status) {
+                        known.status = status;
+                        if (status === 'RUNNING') {
+                            this.buildLogStream.appendActionStart(buildId, name, type);
+                            // Refresh tree so the spinning icon appears immediately
+                            this.onBuildUpdate?.();
+                        } else if (status === 'COMPLETE') {
+                            this.buildLogStream.appendActionComplete(buildId, name, completionStatus);
+                            await this.fetchAndAppendActionLogs(buildId, actionId);
+                            // Refresh tree so the completed action status/icon updates immediately
+                            this.onBuildUpdate?.();
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            logger.warn(`Failed to poll actions for build ${buildId}: ${err}`);
+        }
+    }
+
+    private async fetchAndAppendActionLogs(buildId: string, actionId: string): Promise<void> {
+        try {
+            const artifactsResp = await this.client.getBuildActionArtifacts(actionId);
+            const artifacts = artifactsResp?.data || [];
+
+            // Find log artifacts
+            const logArtifacts = artifacts.filter((a: any) => {
+                const fileType = a?.attributes?.fileType || '';
+                const name = a?.attributes?.fileName || '';
+                return fileType.toLowerCase() === 'log' || name.toLowerCase().includes('log');
+            });
+
+            for (const artifact of logArtifacts) {
+                try {
+                    const artifactDetails = await this.client.getArtifact(artifact.id);
+                    const downloadUrl = artifactDetails?.data?.attributes?.downloadUrl || artifactDetails?.data?.attributes?.fileUrl;
+                    if (downloadUrl) {
+                        const downloaded = await this.client.downloadArtifactContent(downloadUrl);
+                        if (downloaded) {
+                            this.buildLogStream.appendActionLogs(buildId, downloaded);
+                        }
+                    }
+                } catch (e) {
+                    logger.warn(`Failed to download log artifact ${artifact.id} for action ${actionId}`);
+                }
+            }
+        } catch (err) {
+            logger.warn(`Failed to fetch action artifacts for action ${actionId}: ${err}`);
         }
     }
 
@@ -103,17 +238,30 @@ export class BuildMonitor {
                 // Track builds that are in progress
                 if (id && (progress === 'PENDING' || progress === 'RUNNING')) {
                     if (!this.trackedBuilds.has(id)) {
+                        const runNumber = build?.attributes?.number;
+                        const workflowName = `Build #${runNumber || id.slice(-6)}`;
                         this.trackedBuilds.set(id, {
                             id,
-                            workflowName: `Build ${id.slice(-6)}`,
+                            workflowName,
+                            runNumber,
                             status: progress,
-                            state: ''
+                            state: '',
+                            knownActions: new Map()
                         });
+
+                        if (runNumber) {
+                            const config = vscode.workspace.getConfiguration('xcodecloud');
+                            if (config.get<boolean>('autoShowBuildLogs', true)) {
+                                this.buildLogStream.openForBuild(id, runNumber, workflowName).show(true);
+                            } else {
+                                this.buildLogStream.openForBuild(id, runNumber, workflowName);
+                            }
+                        }
                     }
                 }
             }
         } catch (err) {
-            console.error('Failed to discover active builds:', err);
+            logger.error(`Failed to discover active builds: ${err}`);
         }
     }
 
@@ -153,5 +301,6 @@ export class BuildMonitor {
     dispose(): void {
         this.stop();
         this.trackedBuilds.clear();
+        this.buildLogStream.dispose();
     }
 }

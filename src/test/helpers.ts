@@ -39,5 +39,5 @@ export function stubErrorMessage(): { calls: string[]; stub: Stub } {
 }
 
 export function restoreAll(stubs: Stub[]) {
-    for (const s of stubs) s.restore();
+    for (const s of stubs) {s.restore();}
 }
