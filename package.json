@@ -236,7 +236,31 @@
           "group": "3_danger@1"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "xcodecloud.triggerBuild",
+        "key": "shift+enter",
+        "when": "view == xcodecloudWorkflowRuns && viewItem == workflow",
+        "args": {}
+      },
+      {
+        "command": "xcodecloud.cancelBuild",
+        "key": "shift+backspace",
+        "when": "view == xcodecloudWorkflowRuns && viewItem == buildRunActive"
+      },
+      {
+        "command": "xcodecloud.loadTimeline",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l",
+        "when": "view == xcodecloudWorkflowRuns && viewItem =~ /^buildRunComplete/"
+      },
+      {
+        "command": "xcodecloud.refreshWorkflows",
+        "key": "f5",
+        "when": "view == xcodecloudWorkflowRuns"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
