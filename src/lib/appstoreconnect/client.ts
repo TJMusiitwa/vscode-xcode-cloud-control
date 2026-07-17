@@ -348,21 +348,25 @@ export class AppStoreConnectClient {
     }
 
     // Xcode Cloud: cancel a build run
-    // Note: Apple's API may not support DELETE for build runs. The proper way to cancel
-    // a build may be different or not available via the API. This currently attempts DELETE.
-    async cancelBuildRun(buildRunId: string) {
-        const url = `${BASE_URL}/ciBuildRuns/${buildRunId}`;
-        const headers = await this.getHeaders();
-        const res = await request(url, { method: 'DELETE', headers });
-        if (res.statusCode >= 400) {
-            const text = await res.body.text();
-            // If API doesn't support cancellation, provide helpful error
-            if (res.statusCode === 403 || res.statusCode === 405) {
-                throw new Error(`Build cancellation is not supported via the API. Status: ${res.statusCode}`);
+    // Apple's public App Store Connect API reference (Build Runs collection) documents only
+    // read and start-a-build operations for ciBuildRuns - there is no documented cancel/stop
+    // endpoint. This DELETE call is speculative and reliably fails on real accounts; surface
+    // that plainly rather than implying the feature works. Routed through this.delete() (rather
+    // than a raw undici call) so it shares the request queue/retry behavior of every other call.
+    async cancelBuildRun(buildRunId: string): Promise<true> {
+        try {
+            await this.delete(`/ciBuildRuns/${buildRunId}`);
+            return true;
+        } catch (err) {
+            if (err instanceof AscApiError && (err.statusCode === 403 || err.statusCode === 404 || err.statusCode === 405)) {
+                throw new Error(
+                    `Build cancellation is not supported by the App Store Connect API (status ${err.statusCode}). ` +
+                    `Apple does not currently document a cancel/stop endpoint for ciBuildRuns - cancel the build from ` +
+                    `the App Store Connect or Xcode Cloud UI instead.`
+                );
             }
-            throw new Error(`DELETE ${url} failed (${res.statusCode}): ${text}`);
+            throw err;
         }
-        return true;
     }
 
     // Xcode Cloud: get build actions (for logs)
