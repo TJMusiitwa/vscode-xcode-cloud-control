@@ -323,7 +323,9 @@ export class AppStoreConnectClient {
 
     // Xcode Cloud: trigger a build run
     // Valid relationships: workflow (required), sourceBranchOrTag (optional), pullRequest (optional), buildRun (optional for re-runs)
-    async createBuildRun(workflowId: string, gitRefId?: string, options?: { clean?: boolean }) {
+    // gitRefId and pullRequestId are mutually exclusive - Apple's API accepts a build target of
+    // either a branch/tag or a pull request, not both.
+    async createBuildRun(workflowId: string, gitRefId?: string, options?: { clean?: boolean; pullRequestId?: string }) {
         const payload: any = {
             data: {
                 type: 'ciBuildRuns',
@@ -336,7 +338,9 @@ export class AppStoreConnectClient {
             }
         };
         // Use sourceBranchOrTag to specify a branch or tag reference (NOT sourceCommit)
-        if (gitRefId) {
+        if (options?.pullRequestId) {
+            payload.data.relationships['pullRequest'] = { data: { type: 'scmPullRequests', id: options.pullRequestId } };
+        } else if (gitRefId) {
             payload.data.relationships['sourceBranchOrTag'] = { data: { type: 'scmGitReferences', id: gitRefId } };
         }
         const res = await this.post('/ciBuildRuns', payload);
@@ -599,5 +603,48 @@ export class AppStoreConnectClient {
         const query: Record<string, string> = {};
         if (options?.limit) { query['limit'] = String(options.limit); }
         return this.get(`/ciProducts/${productId}/primaryRepositories`, query);
+    }
+
+    // ==========================
+    // Source Code Management (SCM)
+    // ==========================
+
+    /**
+     * List all SCM providers (e.g. GitHub, Bitbucket) connected to Xcode Cloud
+     */
+    async listScmProviders(options?: { limit?: number }) {
+        const cacheKey = `listScmProviders_${options?.limit || 'default'}`;
+        const cached = this.getCache(cacheKey);
+        if (cached) { return cached; }
+
+        const query: Record<string, string> = {};
+        if (options?.limit) { query['limit'] = String(options.limit); }
+        const data = await this.get('/scmProviders', query);
+        this.setCache(cacheKey, data, 300_000); // 5 min TTL - providers rarely change
+        return data;
+    }
+
+    /**
+     * List all repositories available to a specific SCM provider
+     */
+    async listRepositoriesForProvider(providerId: string, options?: { limit?: number }) {
+        const items = await this.fetchAllPages(`/scmProviders/${providerId}/repositories`, options?.limit);
+        return { data: items };
+    }
+
+    /**
+     * List pull requests open against a repository that Xcode Cloud can build
+     */
+    async listPullRequests(scmRepoId: string, options?: { limit?: number }) {
+        const limit = options?.limit || 50;
+        const items = await this.fetchAllPages(`/scmRepositories/${scmRepoId}/pullRequests`, limit);
+        return { data: items };
+    }
+
+    /**
+     * Get a single pull request by ID
+     */
+    async getPullRequest(pullRequestId: string) {
+        return this.get(`/scmPullRequests/${pullRequestId}`);
     }
 }

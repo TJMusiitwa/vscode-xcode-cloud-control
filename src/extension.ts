@@ -87,9 +87,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 				const workflowName = workflowNode?.workflowName || `Workflow ${workflowId.slice(-6)}`;
 
-				// Pick branch/tag via scmGitReferences
-				const gitRefId = await unifiedProvider?.pickGitReferenceId(workflowId);
-				const buildRun = await client.createBuildRun(workflowId, gitRefId || undefined);
+				// Pick branch/tag (scmGitReferences) or an open pull request (scmPullRequests) as the build target
+				const target = await unifiedProvider?.pickBuildTarget(workflowId);
+				const buildRun = await client.createBuildRun(workflowId, target?.gitRefId, { pullRequestId: target?.pullRequestId });
 
 				const buildId = buildRun?.id;
 				if (buildId) {

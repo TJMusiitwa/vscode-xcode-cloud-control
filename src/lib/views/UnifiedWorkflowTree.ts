@@ -73,18 +73,45 @@ export class UnifiedWorkflowTreeDataProvider implements vscode.TreeDataProvider<
 
     // Helper: pick git reference for triggering builds
     async pickGitReferenceId(workflowId: string): Promise<string | undefined> {
+        const target = await this.pickBuildTarget(workflowId);
+        return target?.gitRefId;
+    }
+
+    // Helper: pick a branch/tag or an open pull request as the target for a triggered build.
+    // Xcode Cloud can build either a sourceBranchOrTag or a pullRequest, not both, so this
+    // presents both options in one grouped quick pick.
+    async pickBuildTarget(workflowId: string): Promise<{ gitRefId?: string; pullRequestId?: string } | undefined> {
         const wf = await this.client.getWorkflow(workflowId);
         const repoId = wf?.data?.relationships?.repository?.data?.id;
         if (!repoId) { return undefined; }
 
-        const refs = await this.client.listGitReferences(repoId);
-        const items = (refs?.data || []).map((ref: any) => ({
+        const [refs, pullRequests] = await Promise.all([
+            this.client.listGitReferences(repoId),
+            this.client.listPullRequests(repoId).catch(() => ({ data: [] }))
+        ]);
+
+        const refItems = (refs?.data || []).map((ref: any) => ({
             label: ref?.attributes?.name || ref.id,
             description: ref?.attributes?.kind || '',
-            id: ref.id
+            gitRefId: ref.id
         }));
-        const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Select branch/tag (optional)' });
-        return (pick as any)?.id;
+
+        const openPullRequests = (pullRequests?.data || []).filter((pr: any) => !pr?.attributes?.isClosed);
+        const prItems = openPullRequests.map((pr: any) => ({
+            label: `#${pr?.attributes?.number ?? pr.id} ${pr?.attributes?.title || ''}`.trim(),
+            description: `${pr?.attributes?.sourceBranchName || '?'} → ${pr?.attributes?.destinationBranchName || '?'}`,
+            pullRequestId: pr.id
+        }));
+
+        const items: any[] = [...refItems];
+        if (prItems.length > 0) {
+            items.push({ label: 'Pull Requests', kind: vscode.QuickPickItemKind.Separator });
+            items.push(...prItems);
+        }
+
+        const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Select branch/tag or pull request (optional)' });
+        if (!pick) { return undefined; }
+        return { gitRefId: (pick as any).gitRefId, pullRequestId: (pick as any).pullRequestId };
     }
 
     private async getWorkflows(): Promise<WorkflowNode[]> {
