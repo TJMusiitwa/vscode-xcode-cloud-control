@@ -33,11 +33,12 @@ A Visual Studio Code extension to **manage, monitor, and trigger Xcode Cloud bui
 - **Log Download & Caching**: Download full build action logs and cache them for instant re-opening on subsequent clicks.
 
 ### 🎛️ Quick Actions & Keyboard Shortcuts
-- **Trigger Build**: Start new builds with smart branch/tag/pull-request discovery.
+- **Trigger Build**: Start new builds, picking a branch/tag or any open pull request as the target.
   - **Keyboard**: `Shift+Enter` (when a workflow is selected)
   - **Context Menu**: Right-click a workflow → "Trigger Build"
-- **Cancel Build**: Stop running builds with a single click.
+- **Cancel Build**: Attempts to stop a running build.
   - **Keyboard**: `Shift+Backspace` (when an active build is selected)
+  - ⚠️ Apple's App Store Connect API does not currently document a cancel/stop endpoint for Xcode Cloud build runs. This command will report an error rather than silently no-op — cancel from the App Store Connect or Xcode Cloud UI if it fails.
 - **Load Timeline**: View detailed breakdown of a completed build.
   - **Keyboard**: `Ctrl+Shift+L` / `Cmd+Shift+L` (when a completed build is selected)
   - **Auto-triggers**: Automatically loads when you click a completed build run
@@ -134,12 +135,20 @@ Configure extension behavior via VS Code Settings (`Cmd/Ctrl+,` → search "Xcod
 This extension utilizes the [App Store Connect API v1](https://developer.apple.com/documentation/appstoreconnectapi) endpoints:
 
 - `GET /v1/ciProducts` - Product discovery.
-- `GET /v1/ciWorkflows` - Workflow CRUD operations.
-- `GET /v1/ciBuildRuns` - Build history and tracking.
-- `GET /v1/ciBuildActions` - Action/step monitoring.
+- `GET/POST/PATCH/DELETE /v1/ciWorkflows` - Full workflow CRUD.
+- `GET/POST /v1/ciBuildRuns` - Build history, tracking, and triggering.
+- `DELETE /v1/ciBuildRuns/{id}` - Attempted build cancellation (undocumented by Apple; not guaranteed to succeed — see Cancel Build above).
+- `GET /v1/ciBuildRuns/{id}/actions` - Action/step monitoring.
+- `GET /v1/ciBuildActions/{id}/artifacts` & `/v1/ciArtifacts/{id}` - Log/artifact download.
 - `GET /v1/ciBuildActions/{id}/testResults` - Individual test result analysis.
 - `GET /v1/ciBuildActions/{id}/issues` - Xcode Cloud build issues reporting.
-- `GET /v1/scmRepositories` & `/v1/scmGitReferences` - Repository and branch management.
+- `GET /v1/ciXcodeVersions` & `/v1/ciXcodeVersions/{id}/macOsVersions` - Available toolchain versions for the workflow editor.
+- `GET /v1/ciProducts/{id}/primaryRepositories` - Repositories linked to a product.
+- `GET /v1/scmRepositories/{id}/gitReferences` - Branch/tag discovery for triggering builds.
+- `GET /v1/scmRepositories/{id}/pullRequests` & `/v1/scmPullRequests/{id}` - Open pull requests as build targets.
+- `GET /v1/scmProviders` & `/v1/scmProviders/{id}/repositories` - Connected SCM providers (GitHub, Bitbucket, etc.) and their repositories.
+
+Not implemented: linking/creating SCM providers or repositories (Xcode Cloud's connected-repository setup must be done in App Store Connect itself), and per-build-action retry/skip.
 
 ## 🤝 Contributing
 
