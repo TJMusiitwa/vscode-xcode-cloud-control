@@ -1,24 +1,21 @@
-import typescriptEslint from "typescript-eslint";
+import babelParser from "@babel/eslint-parser";
 
 export default [{
     files: ["**/*.ts"],
 }, {
-    plugins: {
-        "@typescript-eslint": typescriptEslint.plugin,
-    },
-
     languageOptions: {
-        parser: typescriptEslint.parser,
+        parser: babelParser,
+        parserOptions: {
+            requireConfigFile: false,
+            babelOptions: {
+                plugins: ["@babel/plugin-syntax-typescript"],
+            },
+        },
         ecmaVersion: 2022,
         sourceType: "module",
     },
 
     rules: {
-        "@typescript-eslint/naming-convention": ["warn", {
-            selector: "import",
-            format: ["camelCase", "PascalCase"],
-        }],
-
         curly: "warn",
         eqeqeq: "warn",
         "no-throw-literal": "warn",

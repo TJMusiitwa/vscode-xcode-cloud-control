@@ -1,13 +1,14 @@
 {
 	"compilerOptions": {
-		"module": "commonjs",
-		"moduleResolution": "node",
+		"module": "node16",
+		"moduleResolution": "node16",
 		"target": "ES2024",
 		"lib": [
 			"ES2024"
 		],
 		"sourceMap": true,
 		"rootDir": "src",
+		"types": ["node", "mocha"],
 		"strict": true, /* enable all strict type-checking options */
 		/* Additional Checks */
 		// "noImplicitReturns": true, /* Report error when not all code paths in function return a value. */

@@ -12,7 +12,10 @@ suite('AscApiError Tests', () => {
 
     test('formats 403 error correctly', () => {
         const err = new AscApiError(403, '/ciWorkflows', 'Forbidden');
-        assert.strictEqual(err.message, 'Insufficient permissions for this operation.');
+        assert.strictEqual(
+            err.message,
+            'Forbidden (403): Forbidden\n\nPossible causes:\n• API key lacks "Xcode Cloud" permission in App Store Connect\n• API key has been revoked\n• Re-run "Configure App Store Connect Credentials" to check your key.'
+        );
     });
 
     test('formats 404 error correctly', () => {

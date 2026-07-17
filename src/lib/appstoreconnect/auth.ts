@@ -1,4 +1,3 @@
-import { importPKCS8, SignJWT } from 'jose';
 import * as vscode from 'vscode';
 import { JWT_EXPIRY_SECONDS } from '../constants';
 import { CredentialKeys } from '../credentials';
@@ -27,6 +26,7 @@ export class JwtProvider {
             throw new Error('Missing App Store Connect credentials. Run: Xcode Cloud: Configure App Store Connect Credentials');
         }
 
+        const { importPKCS8, SignJWT } = await import('jose');
         const ecPrivateKey = await importPKCS8(privateKey, ALG);
         const iat = Math.floor(Date.now() / 1000);
         const exp = iat + JWT_EXPIRY_SECONDS; // must be <= 20 minutes per Apple docs
